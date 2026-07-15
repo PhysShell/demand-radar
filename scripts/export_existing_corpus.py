@@ -7,13 +7,27 @@ Converts corpus already committed in the sibling OwnAudit/Own.NET checkouts
 (default: ../OwnAudit, ../Own.NET; override with OWNAUDIT_ROOT / OWNNET_ROOT)
 into two local, gitignored outputs under data/live/:
 
-  historical-replay-evidence.jsonl            RawEvidenceRecord contract
-                                               (demand_radar.ingest.jsonl),
-                                               problem_evidence only.
+  historical-replay-evidence.jsonl           RawEvidenceRecord contract
+                                              (demand_radar.ingest.jsonl),
+                                              problem_evidence only.
 
-  historical-replay-technical-prevalence.json Supplemental manifest, NOT the
-                                               production schema. Everything
-                                               this script actually found.
+  historical-replay-corpus-observations.json Supplemental manifest, NOT the
+                                              production schema. Every real
+                                              corpus census observation this
+                                              script found -- deliberately
+                                              NOT called "technical_prevalence
+                                              findings": see CATEGORIES below,
+                                              a census mixes confirmed true
+                                              positives with false positives,
+                                              unresolved review items, a
+                                              rerun's own aggregate summary,
+                                              and CI-run titles that only
+                                              prove a workflow executed.
+                                              Collapsing that into one
+                                              "findings" number is exactly the
+                                              kind of confident-sounding
+                                              arithmetic error this replay
+                                              exists to avoid.
 
 Why the first file is expected to come out empty
 --------------------------------------------------
@@ -25,10 +39,11 @@ script reads (OwnAudit/leakmine's own output -- which does not exist, see
 below -- and Own.NET's corpus/ + docs/notes/ mining record) is exactly that
 shape. So `build_problem_evidence_jsonl()` below has a real, wired code path
 (it round-trips through RawEvidenceRecord and would emit real lines if it
-ever received a record with a genuine external author + timestamp), but the
-census this script performs supplies it with zero inputs. That is a finding,
-not a bug in this script -- see the report for the corpus census that
-produced it.
+ever received a record with a genuine external author + timestamp) -- see
+tests/unit/test_export_existing_corpus.py for a synthetic, non-census proof
+that path is correct -- but the census this script performs supplies it with
+zero real inputs. That is a finding, not a bug in this script -- see the
+report for the corpus census that produced it.
 
 Sources read
 ------------
@@ -40,19 +55,24 @@ Sources read
    zero-record source, not silently skipped.
 2. Own.NET/corpus/{real-world,wpf,di}/*/notes.md -- parsed programmatically
    for a github.com/OWNER/REPO/(pull|issues)/NUMBER reference. Mechanical,
-   not hand-transcribed.
+   not hand-transcribed. Category: cited_origin_unverified (the record is a
+   real URL, but this script never re-fetched it).
 3. A hand-curated, source-cited transcription of Own.NET's own mining
    write-ups (docs/notes/oracle-sweep-2026-07-10.md, oracle-sweep-rerun-
    2026-07-11.md, real-world-mining.md) -- these are markdown prose+tables
    with no stable machine-readable form, so TIER_A below transcribes them
    with an explicit `source_doc` citation on every entry, faithful to the
-   tables as read on 2026-07-15. Not re-derived from raw CI logs.
+   tables as read on 2026-07-15. Not re-derived from raw CI logs. Category:
+   confirmed_tp / false_positive / review_pending / aggregate_validation,
+   derived from each entry's own verdict text -- these docs report a mix of
+   all four, not a uniform set of confirmed findings.
 4. A breadth census of GitHub Actions run history (oracle.yml, mine.yml,
    mine-on-push.yml, mine-run.yml in PhysShell/Own.NET) -- repo names, run
    ids, dates, commit shas where the run title states one, taken from run
    *metadata* only (titles/timestamps via the GitHub API). No job log or
    artifact content was read for TIER_B; it is real (these are actual
-   completed CI runs) but *unverified in this replay* beyond the title.
+   completed CI runs) but proves only that the workflow ran against that
+   repo, not any specific finding count. Category: ci_run_metadata.
 """
 
 from __future__ import annotations
@@ -70,27 +90,67 @@ OUT_DIR = REPO_ROOT / "data" / "live"
 
 GITHUB_REF_RE = re.compile(r"github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/(pull|issues)/(\d+)")
 
+# The only six honest shapes a corpus census observation can be in this
+# replay. Never "technical finding" as an undifferentiated bucket -- that
+# phrase hides the difference between "Own.NET was right", "Own.NET was
+# wrong", "nobody decided yet", "a rerun re-confirmed earlier rows" (not a
+# new observation about a repo), and "a CI job with this repo's name ran"
+# (which says nothing about what it found).
+CONFIRMED_TP = "confirmed_tp"
+FALSE_POSITIVE = "false_positive"
+REVIEW_PENDING = "review_pending"
+AGGREGATE_VALIDATION = "aggregate_validation"
+CI_RUN_METADATA = "ci_run_metadata"
+CITED_ORIGIN_UNVERIFIED = "cited_origin_unverified"
+
 
 @dataclass
-class TechnicalPrevalenceItem:
-    """One documented technical_prevalence data point. NOT the EvidenceItem
-    schema -- there is no author to hash and usually no single publish
-    timestamp (a repeatedly-rerun analyzer sweep isn't a "published" event).
+class CorpusObservation:
+    """One documented corpus census observation. NOT the EvidenceItem schema
+    -- there is no author to hash and usually no single publish timestamp (a
+    repeatedly-rerun analyzer sweep isn't a "published" event). NOT uniformly
+    a "technical finding" either -- see `category`.
     """
 
     repo: str
     tier: str  # "A" verified/triaged | "B" named in CI history only | "C" cited-origin
     finding_summary: str
-    verdict: str  # e.g. "TP", "FP", "review", "mixed", "not independently re-verified"
+    verdict: str  # e.g. "TP", "FP", "review", "confirmed ...", "not independently re-verified"
     source_doc: str  # path or "GitHub Actions run <id>", auditable back to a real artifact
     commit: str | None = None
     url: str | None = None
     excluded_reason: str | None = None  # set when found but NOT counted (e.g. internal issue ref)
 
+    @property
+    def category(self) -> str:
+        """Derived from `tier`/`verdict`, not re-entered per item -- a typo'd
+        category string 43 times over would be exactly the kind of silent
+        miscount this correction exists to fix. Raises loudly on a verdict
+        shape this mapping doesn't recognise, rather than defaulting to a
+        category that might be wrong.
+        """
+        if self.tier == "B":
+            return CI_RUN_METADATA
+        if self.tier == "C":
+            return CITED_ORIGIN_UNVERIFIED
+        v = self.verdict.strip().lower()
+        if v.startswith("tp"):
+            return CONFIRMED_TP
+        if v.startswith("fp"):
+            return FALSE_POSITIVE
+        if v.startswith("review"):
+            return REVIEW_PENDING
+        if v.startswith("confirmed"):
+            return AGGREGATE_VALIDATION
+        raise ValueError(
+            f"cannot categorize verdict {self.verdict!r} for tier {self.tier!r} "
+            f"(repo={self.repo!r}) -- add a case rather than guess"
+        )
+
 
 @dataclass
 class Census:
-    technical_prevalence: list[TechnicalPrevalenceItem] = field(default_factory=list)
+    corpus_observations: list[CorpusObservation] = field(default_factory=list)
     problem_evidence_raw: list[dict] = field(default_factory=list)
     excluded: list[dict] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
@@ -168,8 +228,8 @@ def scan_corpus_notes(census: Census) -> None:
                 continue
             seen_urls[url] = case_dir.name
             corpus_sub = case_dir.relative_to(OWNNET_ROOT / "corpus").parts[0]
-            census.technical_prevalence.append(
-                TechnicalPrevalenceItem(
+            census.corpus_observations.append(
+                CorpusObservation(
                     repo=owner_repo,
                     tier="C",
                     finding_summary=(
@@ -189,15 +249,17 @@ def scan_corpus_notes(census: Census) -> None:
 # ---------------------------------------------------------------------------
 # 3. TIER A -- hand-transcribed, source-cited, from the 3 write-up docs.
 #    Every row below is faithful to a specific doc; verify by re-reading the
-#    cited file. Commits are copied verbatim from those docs.
+#    cited file. Commits are copied verbatim from those docs. `verdict`
+#    starting with "TP"/"FP"/"review"/"confirmed" drives `category` above --
+#    keep that prefix accurate, it is not just descriptive text.
 # ---------------------------------------------------------------------------
 _ORACLE_SWEEP_DOC = "Own.NET/docs/notes/oracle-sweep-2026-07-10.md"
 _ORACLE_RERUN_DOC = "Own.NET/docs/notes/oracle-sweep-rerun-2026-07-11.md"
 _MINING_DOC = "Own.NET/docs/notes/real-world-mining.md"
 
-TIER_A: list[TechnicalPrevalenceItem] = [
+TIER_A: list[CorpusObservation] = [
     # --- oracle sweep 2026-07-10 (issue #201), per-repo triaged clusters ---
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "ShareX/ShareX",
         "A",
         "OWN001 Controls.Add/AddRange transitive disposal (~24 sites)",
@@ -205,7 +267,7 @@ TIER_A: list[TechnicalPrevalenceItem] = [
         _ORACLE_SWEEP_DOC,
         commit="0df9ca4",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "ShareX/ShareX",
         "A",
         "OWN001 IContainer-registered components (~6 sites)",
@@ -213,7 +275,7 @@ TIER_A: list[TechnicalPrevalenceItem] = [
         _ORACLE_SWEEP_DOC,
         commit="0df9ca4",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "ShareX/ShareX",
         "A",
         "OWN001 using(field = new T()) (3 sites)",
@@ -221,7 +283,7 @@ TIER_A: list[TechnicalPrevalenceItem] = [
         _ORACLE_SWEEP_DOC,
         commit="0df9ca4",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "ShareX/ShareX",
         "A",
         "OWN001 HistoryItemManager_ContextMenu cluster, no Dispose() at all (48 findings)",
@@ -229,7 +291,7 @@ TIER_A: list[TechnicalPrevalenceItem] = [
         _ORACLE_SWEEP_DOC,
         commit="0df9ca4",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "ShareX/ShareX",
         "A",
         "OWN001 ShapeManagerMenu.cs / menuForm leak -- flagship (39 findings); "
@@ -238,7 +300,7 @@ TIER_A: list[TechnicalPrevalenceItem] = [
         _ORACLE_SWEEP_DOC,
         commit="0df9ca4",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "ShareX/ShareX",
         "A",
         "OWN001 plain Timer/ImageList fields never disposed (4 sites)",
@@ -246,7 +308,7 @@ TIER_A: list[TechnicalPrevalenceItem] = [
         _ORACLE_SWEEP_DOC,
         commit="0df9ca4",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "ShareX/ShareX",
         "A",
         "OWN001 custom-type Dispose semantics unread (3 sites)",
@@ -254,7 +316,7 @@ TIER_A: list[TechnicalPrevalenceItem] = [
         _ORACLE_SWEEP_DOC,
         commit="0df9ca4",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "ShareX/ShareX",
         "A",
         "OWN001 event-subscription findings, bulk (89 sites, 1 spot-checked)",
@@ -262,7 +324,7 @@ TIER_A: list[TechnicalPrevalenceItem] = [
         _ORACLE_SWEEP_DOC,
         commit="0df9ca4",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "MahApps/MahApps.Metro",
         "A",
         "OWN001 CommandTriggerAction.cs:116 DP subscription-rotation",
@@ -270,7 +332,7 @@ TIER_A: list[TechnicalPrevalenceItem] = [
         _ORACLE_SWEEP_DOC,
         commit="72099e3",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "MahApps/MahApps.Metro",
         "A",
         "OWN001 TiltBehavior.cs:70 Behavior<T>.AssociatedObject",
@@ -278,7 +340,7 @@ TIER_A: list[TechnicalPrevalenceItem] = [
         _ORACLE_SWEEP_DOC,
         commit="72099e3",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "MahApps/MahApps.Metro",
         "A",
         "OWN001 MetroWindow.cs:1448 template-part local pattern var",
@@ -286,7 +348,7 @@ TIER_A: list[TechnicalPrevalenceItem] = [
         _ORACLE_SWEEP_DOC,
         commit="72099e3",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "MaterialDesignInXAML/MaterialDesignInXamlToolkit",
         "A",
         "OWN001 App.xaml.cs:22 app-scoped themeManager",
@@ -294,7 +356,7 @@ TIER_A: list[TechnicalPrevalenceItem] = [
         _ORACLE_SWEEP_DOC,
         commit="ef3a5ea",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "MaterialDesignInXAML/MaterialDesignInXamlToolkit",
         "A",
         "OWN001 7x themeManager.ThemeChanged on plain windows/VMs, bulk",
@@ -302,7 +364,7 @@ TIER_A: list[TechnicalPrevalenceItem] = [
         _ORACLE_SWEEP_DOC,
         commit="ef3a5ea",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "MaterialDesignInXAML/MaterialDesignInXamlToolkit",
         "A",
         "OWN001 SmartHint.cs:205-208 DP rotation (4 findings)",
@@ -310,7 +372,7 @@ TIER_A: list[TechnicalPrevalenceItem] = [
         _ORACLE_SWEEP_DOC,
         commit="ef3a5ea",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "MaterialDesignInXAML/MaterialDesignInXamlToolkit",
         "A",
         "OWN001 CircleWipe.cs/FadeWipe.cs returned-fresh-Timeline",
@@ -318,7 +380,7 @@ TIER_A: list[TechnicalPrevalenceItem] = [
         _ORACLE_SWEEP_DOC,
         commit="ef3a5ea",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "MaterialDesignInXAML/MaterialDesignInXamlToolkit",
         "A",
         "OWN001 ListsAndGridsViewModel.cs self-owned-collection-element",
@@ -326,7 +388,7 @@ TIER_A: list[TechnicalPrevalenceItem] = [
         _ORACLE_SWEEP_DOC,
         commit="ef3a5ea",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "icsharpcode/AvalonEdit",
         "A",
         "OWN001 AbstractMargin/LineNumberMargin/FoldingMargin DP rotation (3 sites)",
@@ -334,7 +396,7 @@ TIER_A: list[TechnicalPrevalenceItem] = [
         _ORACLE_SWEEP_DOC,
         commit="ed0bd14",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "icsharpcode/AvalonEdit",
         "A",
         "OWN001 OverloadViewer.cs:58,64 template-part local (2 sites)",
@@ -342,7 +404,7 @@ TIER_A: list[TechnicalPrevalenceItem] = [
         _ORACLE_SWEEP_DOC,
         commit="ed0bd14",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "icsharpcode/AvalonEdit",
         "A",
         "OWN014 ImeSupport.cs:47 CommandManager.RequerySuggested (weak-event)",
@@ -350,7 +412,7 @@ TIER_A: list[TechnicalPrevalenceItem] = [
         _ORACLE_SWEEP_DOC,
         commit="ed0bd14",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "icsharpcode/AvalonEdit",
         "A",
         "OWN001 DropDownButton.cs:78 self-detaching handler",
@@ -358,7 +420,7 @@ TIER_A: list[TechnicalPrevalenceItem] = [
         _ORACLE_SWEEP_DOC,
         commit="ed0bd14",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "icsharpcode/AvalonEdit",
         "A",
         "OWN001 Caret.cs/TextAreaAutomationPeer.cs/ImeSupport.cs:48 composition-owned back-refs",
@@ -366,7 +428,7 @@ TIER_A: list[TechnicalPrevalenceItem] = [
         _ORACLE_SWEEP_DOC,
         commit="ed0bd14",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "icsharpcode/AvalonEdit",
         "A",
         "OWN001 TextView.cs:1843,1946 services/hoverLogic, no Dispose() at all",
@@ -374,7 +436,7 @@ TIER_A: list[TechnicalPrevalenceItem] = [
         _ORACLE_SWEEP_DOC,
         commit="ed0bd14",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "ClosedXML/ClosedXML",
         "A",
         "OWN001 Slice.cs Enumerator locals, Dispose() statically empty "
@@ -382,8 +444,9 @@ TIER_A: list[TechnicalPrevalenceItem] = [
         "FP",
         _ORACLE_SWEEP_DOC,
     ),
-    # --- oracle sweep rerun 2026-07-11: confirms fixes silenced the FPs above, 0 regressions ---
-    TechnicalPrevalenceItem(
+    # --- oracle sweep rerun 2026-07-11: re-confirms the rows above on the SAME 4 repos,
+    #     not a new/5th repository -- excluded from the repo census, see `category`. ---
+    CorpusObservation(
         "MahApps/MahApps.Metro, MaterialDesignInXamlToolkit, AvalonEdit, ShareX",
         "A",
         "Rerun on identical pinned commits after PR #230/#231: OWN001+OWN014 "
@@ -392,7 +455,7 @@ TIER_A: list[TechnicalPrevalenceItem] = [
         _ORACLE_RERUN_DOC,
     ),
     # --- real-world-mining.md milestone 1 ---
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "DapperLib/Dapper",
         "A",
         "OWN001 BenchmarkBase._connection, undisposed SqlConnection field (benchmark project)",
@@ -400,7 +463,7 @@ TIER_A: list[TechnicalPrevalenceItem] = [
         _MINING_DOC,
         commit="72a54c4",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "JoshClose/CsvHelper",
         "A",
         "OWN001 undisposed StreamReader/Writer/CsvDataReader locals in tests "
@@ -409,7 +472,7 @@ TIER_A: list[TechnicalPrevalenceItem] = [
         _MINING_DOC,
         commit="33970e5",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "NickeManarin/ScreenToGif",
         "A",
         "OWN001 VideoSource.xaml.cs:50-83 view->view-model lambda leak, 4 inline "
@@ -419,7 +482,7 @@ TIER_A: list[TechnicalPrevalenceItem] = [
         _MINING_DOC,
         commit="27a49c3",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "NickeManarin/ScreenToGif",
         "A",
         "OWN001 GraphicsConfigurationDialog/Troubleshoot "
@@ -437,53 +500,54 @@ TIER_A: list[TechnicalPrevalenceItem] = [
 #    mine.yml, mine-on-push.yml, mine-run.yml in PhysShell/Own.NET). Real,
 #    completed CI runs; repo names and commits below are copied from the run
 #    title/metadata as returned by the GitHub Actions API on 2026-07-15. No
-#    job log or artifact content was fetched for these -- unverified beyond
-#    the title, unlike TIER_A.
+#    job log or artifact content was fetched for these -- every entry proves
+#    only that a workflow ran against that repo, category=ci_run_metadata,
+#    never a finding count.
 # ---------------------------------------------------------------------------
-TIER_B: list[TechnicalPrevalenceItem] = [
-    TechnicalPrevalenceItem(
+TIER_B: list[CorpusObservation] = [
+    CorpusObservation(
         "StackExchange/StackExchange.Redis",
         "B",
         "oracle run: 'StackExchange.Redis (src/) -- fresh async/connection-heavy repo'",
         "not independently re-verified",
         "GitHub Actions run 28489064469 / 28015525935 (Own.NET)",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "protobuf-net/protobuf-net",
         "B",
         "oracle run: cross-tool oracle on protobuf-net/protobuf-net",
         "not independently re-verified",
         "GitHub Actions run 28288698673 (Own.NET)",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "NLog/NLog",
         "B",
         "oracle run: re-run on NLog to confirm the dispose-helper fix clears 4 timer findings",
         "not independently re-verified",
         "GitHub Actions run 28291035613 (Own.NET)",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "serilog/serilog",
         "B",
         "oracle run: cross-tool oracle on serilog/serilog; mine run: fresh logging-domain repo",
         "not independently re-verified",
         "GitHub Actions run 28288697345 / 28017309028 (Own.NET)",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "JamesNK/Newtonsoft.Json",
         "B",
         "oracle run: cross-tool oracle on JamesNK/Newtonsoft.Json (dotted test dirs excluded)",
         "not independently re-verified",
         "GitHub Actions run 28288696849 (Own.NET)",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "RestSharp/RestSharp",
         "B",
         "oracle run (dev): target RestSharp/RestSharp",
         "not independently re-verified",
         "GitHub Actions run 28277891441 (Own.NET)",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "App-vNext/Polly",
         "B",
         "oracle run: target Polly, re-checked across 3 separate runs "
@@ -491,7 +555,7 @@ TIER_B: list[TechnicalPrevalenceItem] = [
         "not independently re-verified",
         "GitHub Actions run 28276751864 / 28257875923 / 28219556226 (Own.NET)",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "npgsql/npgsql",
         "B",
         "oracle run: cross-tool check Npgsql v8.0.9; mine run: mine + re-mine "
@@ -499,28 +563,28 @@ TIER_B: list[TechnicalPrevalenceItem] = [
         "not independently re-verified",
         "GitHub Actions run 28024878326 / 27953332804 / 28007045840 (Own.NET)",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "SixLabors/ImageSharp",
         "B",
         "mine run: mine + 2x re-mine for ArrayPool/MemoryPool detector validation",
         "not independently re-verified",
         "GitHub Actions run 27946951457 / 27949660130 / 27950215006 (Own.NET)",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "neuecc/MessagePack-CSharp",
         "B",
         "mine run: one-off mining runner (FP audit)",
         "not independently re-verified",
         "GitHub Actions run 27939076311 / 27939557514 (Own.NET)",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "mgravell/Pipelines.Sockets.Unofficial",
         "B",
         "mine run: re-mine Pipelines to verify the PipeReader FP fix (BCL-pool-heavy)",
         "not independently re-verified",
         "GitHub Actions run 27940332931 (Own.NET)",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "WalletWasabi/WalletWasabi",
         "B",
         "mine run: point push-miner at WalletWasabi (Avalonia UI) for "
@@ -528,7 +592,7 @@ TIER_B: list[TechnicalPrevalenceItem] = [
         "not independently re-verified",
         "GitHub Actions run 27816073915 / 27821262838 / 27818746212 (Own.NET)",
     ),
-    TechnicalPrevalenceItem(
+    CorpusObservation(
         "Flow-Launcher/Flow.Launcher",
         "B",
         "mine run: test the imba on a fresh WPF app (Flow.Launcher)",
@@ -560,7 +624,8 @@ def build_problem_evidence_jsonl(census: Census) -> list[str]:
     """Round-trips any genuine problem_evidence record through the real
     RawEvidenceRecord model, so a future record with a real author+timestamp
     is validated the same way `demand-radar ingest` will validate it. Empty
-    today -- see module docstring.
+    on the real corpus census today -- see module docstring; exercised
+    against a synthetic record in tests/unit/test_export_existing_corpus.py.
     """
     import sys
 
@@ -580,8 +645,8 @@ def main() -> int:
     census = Census()
     check_leakmine(census)
     scan_corpus_notes(census)
-    census.technical_prevalence.extend(TIER_A)
-    census.technical_prevalence.extend(TIER_B)
+    census.corpus_observations.extend(TIER_A)
+    census.corpus_observations.extend(TIER_B)
     census.notes.append(MINE_REPORT_ARTIFACT_NOTE)
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -590,15 +655,18 @@ def main() -> int:
     evidence_path = OUT_DIR / "historical-replay-evidence.jsonl"
     evidence_path.write_text("".join(line + "\n" for line in evidence_lines), encoding="utf-8")
 
-    manifest_path = OUT_DIR / "historical-replay-technical-prevalence.json"
+    manifest_path = OUT_DIR / "historical-replay-corpus-observations.json"
     manifest_path.write_text(
         json.dumps(
             {
                 "schema": (
-                    "demand-radar.historical-replay-technical-prevalence/1 "
+                    "demand-radar.historical-replay-corpus-observations/1 "
                     "(NOT a production schema)"
                 ),
-                "technical_prevalence": [asdict(item) for item in census.technical_prevalence],
+                "corpus_observations": [
+                    {**asdict(item), "category": item.category}
+                    for item in census.corpus_observations
+                ],
                 "excluded": census.excluded,
                 "notes": census.notes,
             },
@@ -608,16 +676,35 @@ def main() -> int:
         encoding="utf-8",
     )
 
-    distinct_repos = {item.repo for item in census.technical_prevalence}
-    tier_a = [i for i in census.technical_prevalence if i.tier == "A"]
-    tier_b = [i for i in census.technical_prevalence if i.tier == "B"]
-    tier_c = [i for i in census.technical_prevalence if i.tier == "C"]
+    # The rerun's own aggregate-validation row re-confirms 4 already-counted
+    # repos; it is not a 5th/24th repository, so it is excluded from the
+    # distinct-repo census (not from corpus_observations itself -- it's kept
+    # there as a real, useful observation, just not a repo-census entry).
+    distinct_repos = {
+        item.repo for item in census.corpus_observations if item.category != AGGREGATE_VALIDATION
+    }
+    by_category: dict[str, int] = {}
+    for item in census.corpus_observations:
+        by_category[item.category] = by_category.get(item.category, 0) + 1
+    tier_a = [i for i in census.corpus_observations if i.tier == "A"]
+    tier_b = [i for i in census.corpus_observations if i.tier == "B"]
+    tier_c = [i for i in census.corpus_observations if i.tier == "C"]
 
     print(f"problem_evidence records (RawEvidenceRecord, ready to ingest): {len(evidence_lines)}")
-    print(f"technical_prevalence items total: {len(census.technical_prevalence)}")
-    print(f"  tier A (fully verified, hand-triaged): {len(tier_a)}")
+    print(f"corpus census observations total: {len(census.corpus_observations)}")
+    print(f"  tier A (hand-triaged from written-up sweeps): {len(tier_a)}")
     print(f"  tier B (named in CI history, not re-verified here): {len(tier_b)}")
-    print(f"  tier C (cited in a corpus regression case): {len(tier_c)}")
+    print(f"  tier C (cited-origin, not re-fetched): {len(tier_c)}")
+    print("by category (this is the number to cite, not the tier total):")
+    for category in (
+        CONFIRMED_TP,
+        FALSE_POSITIVE,
+        REVIEW_PENDING,
+        AGGREGATE_VALIDATION,
+        CI_RUN_METADATA,
+        CITED_ORIGIN_UNVERIFIED,
+    ):
+        print(f"  {category}: {by_category.get(category, 0)}")
     print(f"distinct real external repos referenced: {len(distinct_repos)}")
     print(f"excluded candidates (no verifiable external provenance): {len(census.excluded)}")
     print(f"wrote: {evidence_path}")
