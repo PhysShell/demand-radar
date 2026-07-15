@@ -16,8 +16,15 @@ Zone 1: ingestion (ingest/jsonl.py, ingest/rss.py)
   computes hashes/normalization -- pure functions of the input text
 
 Zone 2: extraction and critique (classify, generate_opportunities, critic_review)
-  read-only from the agent's perspective: no filesystem tool, no shell,
-  no network the agent can direct beyond the CLI's own model-API traffic
+  --analyst/--critic real engine selection is currently Claude-only
+    (`cli.py::run` refuses "codex" for either role -- see below)
+  Claude: read-only from the agent's perspective, verified -- no
+    filesystem tool, no shell (`--tools ""` removes the tool surface
+    structurally, not just by policy), no network the agent can direct
+    beyond the CLI's own model-API traffic
+  Codex: NOT currently permitted here -- its closed-world posture
+    (`--sandbox read-only` + `-c features.shell_tool=false`) is
+    unverified against a live install; see "Codex is refused..." below
   strict JSON Schema output, re-validated with Pydantic independent of
   whatever validation the CLI itself claims to have done
   no write access outside the run directory, and even that is written
@@ -31,18 +38,45 @@ Zone 3: deterministic judge (deterministic_judge, render_report, verify_run)
 
 ## What "read-only" means concretely here
 
-The analyst and critic are never given a filesystem-read tool at all. As of
-the `O7InvokeRunner` migration (`docs/o7-invoke.md`), the actual closed-world
-flags (`--tools ""`/`--strict-mcp-config` for Claude, `--sandbox read-only`
-for Codex) are enforced by **007's `o7 invoke`**, not by code in this
-repository — this codebase only shells out to `o7 invoke` and translates its
-`meta.json` into `AgentResult`. The `read-only-data` capability-profile label
-is still this codebase's vocabulary (`agents/base.py::READ_ONLY_DATA_PROFILE`);
-what it maps to is now 007's responsibility to enforce, and 007 refuses to
-run at all on an unrecognized profile name rather than silently narrowing or
-widening it (007's own `docs/security-layers.md`). Evidence text is not
-something the model goes and reads from a path — it is embedded directly
-into the prompt string by our own code
+The analyst and critic are never given a filesystem-read tool at all — this
+is true for Claude, the only engine `cli.py::run` currently permits for
+`--analyst`/`--critic`. As of the `O7InvokeRunner` migration
+(`docs/o7-invoke.md`), the actual closed-world flags (`--tools ""`/
+`--strict-mcp-config` for Claude) are enforced by **007's `o7 invoke`**, not
+by code in this repository — this codebase only shells out to `o7 invoke`
+and translates its `meta.json` into `AgentResult`. The `read-only-data`
+capability-profile label is still this codebase's vocabulary
+(`agents/base.py::READ_ONLY_DATA_PROFILE`); what it maps to is now 007's
+responsibility to enforce, and 007 refuses to run at all on an unrecognized
+profile name rather than silently narrowing or widening it (007's own
+`docs/security-layers.md`).
+
+**Codex is refused for `--analyst`/`--critic` until this is live-verified**
+(`cli.py::run`, error marker `codex_unverified_for_untrusted_content`). The
+reason is structural, not caution for its own sake: `o7 invoke`'s codex path
+adds `-c features.shell_tool=false` on top of `--sandbox read-only`, but
+**neither flag has ever been exercised against a real `codex` binary** —
+codex is not installed anywhere either this MVP or 007's `invoke.rs` was
+built. `--sandbox read-only` is documented (by 007 itself) to deny writes
+without disabling network; whether `features.shell_tool=false` actually
+removes the tool (Claude's structural guarantee) or merely restricts what
+it can do inside the sandbox (a policy constraint, not a removal) has never
+been observed. An earlier version of this document described Zone 2's
+"no shell" property as if it held for both engines equally — it did not,
+and stating it that way was a real overclaim, not a simplification. Lifting
+this refusal needs: `codex` installed and logged in somewhere, the flags
+above re-verified against `codex --help`/real behavior, and a live
+adversarial smoke test (a prompt-injection payload attempting exactly the
+command-execution/exfiltration path this section is otherwise confident is
+closed) — not just "the flag is present in the argv."
+
+`demand-radar smoke-agents` is unaffected by this refusal: it sends a fixed,
+non-adversarial prompt with no evidence content, purely to check
+reachability/auth, and constructs `O7InvokeRunner` directly rather than
+going through `cli.py::run`'s provider guard.
+
+Evidence text is not something the model goes and reads from a path — it is
+embedded directly into the prompt string by our own code
 (`agents/prompts/*.py`), inside a labeled fence:
 
 ```text
@@ -70,10 +104,12 @@ regardless of whether it "obeys" the bait text or not:
   `recommended_status` is explicitly non-authoritative: `scoring/judge.py`
   is the only code path that ever writes `OpportunityCard.status`.
 - It has no shell, so "run this command" in evidence text has nowhere to
-  go.
-- It has no network tool of its own (Claude: none, structurally; Codex:
-  no `web_search` opt-in — see the residual risk below for the one gap
-  this doesn't close). Enforced by 007's `invoke.rs`, not this repo.
+  go — verified for Claude (`--tools ""`); this is precisely the property
+  that is *not* verified for Codex, which is why Codex is refused above
+  rather than assumed equivalent.
+- It has no network tool of its own for the engine actually in use
+  (Claude: none, structurally). Enforced by 007's `invoke.rs`, not this
+  repo.
 
 ## Auth storage
 
@@ -85,8 +121,9 @@ state already is. No `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`CODEX_API_KEY`/
 `CLAUDE_API_KEY` is read by either codebase; 007's
 `invoke.rs::strip_provider_api_keys` actively **strips** all four from the
 subprocess environment before every call (both engines, not just Codex —
-see `007/docs/decisions.log.md` for why this was added rather than assumed
-from `judge.rs`, which does not strip them), so a key present in the parent
+see `007/docs/o7-invoke.md`'s "Auth" section for why this was added rather
+than assumed from `judge.rs`, which does not strip them), so a key present
+in the parent
 environment for an unrelated reason can never silently substitute for the
 subscription login this is meant to exercise.
 
@@ -149,18 +186,26 @@ it is not silently dropped or ignored.
 
 ## Accepted residual risks
 
-- **Codex flags are unverified against a real install.** `codex` is not
-  installed in the environment either this MVP or 007's `invoke.rs` was
-  built in, so 007's codex flags (`-a never exec - --json --sandbox
-  read-only --skip-git-repo-check --ephemeral --output-last-message <file>`
-  — matched from `judge.rs`'s own already-more-verified pattern, see
-  `007/docs/decisions.log.md`) are checked against public documentation and
-  `judge.rs`'s existing behavior, not against `codex --help` directly.
-  Re-verify before first real use. `demand-radar smoke-agents` will surface
-  `BLOCKED_NOT_INSTALLED` honestly rather than assume success — confirmed
-  live in this environment (`claude: PASS`, `codex: BLOCKED_NOT_INSTALLED`).
+- **Codex flags are unverified against a real install, and this repo
+  refuses to pretend otherwise.** `codex` is not installed in the
+  environment either this MVP or 007's `invoke.rs` was built in, so 007's
+  codex flags (`-a never exec - --json --sandbox read-only
+  --skip-git-repo-check --ephemeral -c features.shell_tool=false
+  --output-last-message <file>` — the read-only/ephemeral/output-last-message
+  set matched from `judge.rs`'s own already-more-verified pattern, the
+  shell_tool flag restored from Demand Radar's own now-deleted `codex_cli.py`,
+  neither exercised live) are checked against public documentation and
+  `judge.rs`'s existing behavior, not against `codex --help` directly. Given
+  that, `cli.py::run` refuses `--analyst codex`/`--critic codex` outright
+  (see "What 'read-only' means concretely here" above) rather than
+  documenting the gap and using it anyway — `demand-radar smoke-agents` is
+  the one path still allowed to reach for codex, and it will surface
+  `BLOCKED_NOT_INSTALLED` honestly rather than assume success (confirmed
+  live in this environment: `claude: PASS`, `codex: BLOCKED_NOT_INSTALLED`).
 - **Codex `--sandbox read-only` does not close network egress** (see
-  above) — inherited, documented in both repos, not solved here.
+  above) — inherited, documented in both repos, not solved here. One of
+  the two reasons Codex is refused for Zone 2 above (the other being the
+  unverified shell-tool removal itself).
 - **This project no longer owns the closed-world enforcement code at
   all — it owns the translation layer.** `O7InvokeRunner` trusts 007's
   `meta.json` as the source of truth for `status`/`schema_valid`/

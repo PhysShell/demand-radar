@@ -165,6 +165,30 @@ def run(
         )
         raise typer.Exit(code=2)
 
+    if "codex" in (analyst, critic):
+        # Zone 2 (classify/generate_opportunities/critic_review) feeds
+        # untrusted evidence text to whichever engine is selected. Claude's
+        # closed-world guarantee is structural (`--tools ""` removes the
+        # tool surface entirely) and live-verified in this environment.
+        # Codex's is not: `o7 invoke`'s codex path relies on `--sandbox
+        # read-only` (denies writes, not network) plus an *unverified*
+        # `-c features.shell_tool=false` -- neither has ever been observed
+        # against a real codex install (see docs/trust-boundaries.md,
+        # 007/docs/o7-invoke.md). Refusing rather than silently accepting
+        # untrusted content into an engine whose tool-removal isn't proven
+        # -- lift this once a live install + adversarial smoke test confirms
+        # the flag actually does what it claims.
+        typer.echo(
+            "error: codex_unverified_for_untrusted_content -- Codex's closed-world "
+            "guarantee (no shell tool) is not verified against a live install and "
+            "must not be used for --analyst/--critic, which process untrusted "
+            "evidence text. Use --analyst claude --critic fake (or vice versa) "
+            "until this is lifted. `demand-radar smoke-agents` may still probe "
+            "codex reachability -- it sends no evidence content.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
     product_config = _load_product_or_exit(product)
     store = _open_store_or_exit(db)
 

@@ -106,6 +106,35 @@ def test_run_refuses_same_provider_for_analyst_and_critic(tmp_path: Path) -> Non
     assert "single_provider_unreviewed" in result.stdout
 
 
+def test_run_refuses_codex_for_untrusted_zone_2(tmp_path: Path) -> None:
+    """Codex's closed-world guarantee is unverified against a live install
+    (docs/trust-boundaries.md) -- --analyst/--critic must refuse it, not
+    silently feed it untrusted evidence text."""
+    db = tmp_path / "d.db"
+    runner.invoke(app, ["init", "--db", str(db)])
+    runner.invoke(
+        app, ["ingest", "--product", "own-audit", "--input", str(FIXTURE), "--db", str(db)]
+    )
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "--product",
+            "own-audit",
+            "--analyst",
+            "claude",
+            "--critic",
+            "codex",
+            "--db",
+            str(db),
+            "--runs-dir",
+            str(tmp_path / "runs"),
+        ],
+    )
+    assert result.exit_code == 2
+    assert "codex_unverified_for_untrusted_content" in result.stdout
+
+
 def test_run_with_fake_runner_completes_and_writes_artifacts(tmp_path: Path) -> None:
     db = tmp_path / "d.db"
     runs_dir = tmp_path / "runs"

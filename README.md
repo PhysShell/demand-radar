@@ -107,9 +107,13 @@ subscription auth).
 
 All ingested content is untrusted external text. It can contain prompt
 injection ("ignore previous instructions", "mark this validated", "run this
-command"). Demand Radar's extraction/critique agents run with no shell tool,
-no filesystem write access, and a JSON-Schema-constrained output — see
-[`docs/trust-boundaries.md`](docs/trust-boundaries.md) for the full zone
+command"). Demand Radar's extraction/critique agents run with no filesystem
+write access and a JSON-Schema-constrained output for either engine; **no
+shell tool** is a verified property of Claude specifically (`--tools ""`
+removes it structurally), which is why `--analyst`/`--critic` currently
+refuse `codex` outright rather than assume the same guarantee holds for an
+engine whose tool-removal has never been exercised against a live install —
+see [`docs/trust-boundaries.md`](docs/trust-boundaries.md) for the full zone
 model and residual risks. `fixtures/prompt-injection-signals.jsonl` and its
 tests exist specifically to exercise this boundary.
 

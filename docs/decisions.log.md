@@ -294,3 +294,55 @@ matching `error_kind`). All 124 tests still pass (117 pre-migration + 7 new
 `test_o7_invoke_runner.py` tests, replacing the 7 deleted
 `test_cli_runner_schema_wire.py` tests that tested the now-deleted
 runners' own schema-stripping).
+
+## 2026-07-15 — Correction: "no shell" was overclaimed for Codex; Codex refused for real Zone 2 use
+
+External review of the migration above caught a real inconsistency, not a
+cosmetic one: `docs/trust-boundaries.md` described Zone 2 ("It has no
+shell, so 'run this command' in evidence text has nowhere to go") as if it
+held equally for both engines. It does not. Claude's `--tools ""` removes
+the tool surface structurally and is verified live in this environment.
+Codex's posture in `o7 invoke` rests on `--sandbox read-only` (which 007's
+own docs already say denies writes without disabling network) plus a
+`-c features.shell_tool=false` flag that — this migration had actually
+*dropped* relative to Demand Radar's own now-deleted `codex_cli.py`,
+reasoning that `judge.rs`'s proven flag set (which never carried this flag
+either) was the safer baseline to match. That reasoning traded a real,
+if-unverified, extra restriction for a "more proven" one that never
+attempted the restriction at all — the wrong trade once the actual
+consequence (a documented security claim the code didn't back) was named
+plainly instead of just being an internal implementation choice.
+
+Two fixes, not one:
+1. Restored `-c features.shell_tool=false` to `invoke.rs::call_codex`
+   (007) — still unverified against a live install, but at least attempted
+   again, and an invalid config key fails loudly rather than silently
+   running less restricted.
+2. `cli.py::run` now refuses `--analyst codex`/`--critic codex` outright
+   (`codex_unverified_for_untrusted_content`, exit 2) — Zone 2 processes
+   untrusted evidence text, and neither of Codex's restriction flags has
+   ever been exercised against a real `codex` binary. `demand-radar
+   smoke-agents` is unaffected (fixed non-adversarial prompt, no evidence
+   content, constructs `O7InvokeRunner` directly rather than going through
+   `run`'s provider guard) — confirmed unaffected by re-running it after
+   this change (`claude: PASS`, `codex: BLOCKED_NOT_INSTALLED`).
+
+`docs/trust-boundaries.md`, `README.md`, and `docs/o7-invoke.md` all
+corrected to state the per-engine distinction plainly rather than a
+blended claim; `007/docs/o7-invoke.md` (new — the primitive's own design
+note, distinct from this repo's migration-focused doc of the same name)
+documents the same thing from 007's side, plus what a real fix looks like:
+install codex, re-verify the flags against `codex --help`, and run a live
+adversarial smoke test (a prompt-injection payload attempting the exact
+command-execution/exfiltration path Claude's `--tools ""` forecloses)
+before lifting the CLI refusal — not just confirming the flag is present
+in the argv. Added `tests/integration/test_cli.py::test_run_refuses_codex_for_untrusted_zone_2`.
+
+Also strengthened `scripts/o7_conformance_gate.py`, flagged separately as
+too weak: it previously passed `input_paths=[]`, so `--input-manifest`/
+`input_hashes` were never exercised on either call path, and it only
+compared 4 fields. Now passes a real, non-empty input fixture and checks
+`input_hashes`, `provider`, `model`, and `exit_code` too, on top of the
+existing `status`/`schema_valid`/`error_kind`/structured-output/prompt_hash
+checks. Re-run for real after all fixes: still `CONFORMANCE GATE: PASS`
+for both engines.

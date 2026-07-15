@@ -5,9 +5,12 @@ This is the follow-up to [`docs/o7-bridge-proposal.md`](o7-bridge-proposal.md)
 real: `007/src/invoke.rs`, dispatched from `007/src/main.rs`, with Demand
 Radar's `agents/o7_invoke.py::O7InvokeRunner` as its one client. This is a
 genuine cross-repo dependency now, not a "someday" note — Demand Radar's
-`run` command shells out to the `o7` binary for both the `claude` and
-`codex` providers, and no longer contains its own closed-world CLI-flag
-knowledge at all.
+`run` command shells out to the `o7` binary for the `claude` engine (the
+only one `--analyst`/`--critic` currently permit — see
+`docs/trust-boundaries.md`: Codex's closed-world posture is unverified
+against a live install and is refused for real evidence processing until
+that changes), and no longer contains its own closed-world CLI-flag
+knowledge at all for either engine.
 
 ## What `o7 invoke` actually looks like
 
