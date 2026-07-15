@@ -1,0 +1,51 @@
+# Griff profile — spec section 11.2.
+# For this MVP, griff exists to prove the schema/pipeline generalize beyond
+# OwnAudit, not to run a full research campaign — the spec does not give
+# positive/negative examples for it, so none are invented here. Real
+# acceptance fixtures stay scoped to OwnAudit (see fixtures/).
+config_version: 1
+product: griff
+display_name: "Griff — swancore guitar riff generator"
+
+problem_queries:
+  - "how to write a second guitar part"
+  - "second guitar sounds the same as first"
+  - "riff variation generator"
+  - "stuck writing guitar riffs"
+  - "generate guitar tab from MIDI"
+  - "Guitar Pro riff generator"
+  - "how to vary a guitar riff"
+  - "counterpoint for two guitars"
+  - "AI guitar tabs unplayable"
+  - "complementary guitar part"
+
+personas:
+  - "home-recording guitarist"
+  - "songwriter"
+  - "small-band guitarist"
+  - "producer working with MIDI"
+  - "Guitar Pro user"
+
+positive_examples: []
+negative_examples: []
+
+thresholds:
+  minimum_unique_authors: 3
+  minimum_source_families: 2
+  minimum_problem_evidence: 3
+  minimum_workaround_evidence: 1
+
+deduplication:
+  similarity_threshold: 0.5
+
+scoring_weights:
+  frequency: 1.0
+  recent_growth: 1.5
+  pain: 2.0
+  urgency: 1.5
+  commercial_intent: 2.5
+  commitment: 4.0
+  product_fit: 2.0
+  source_diversity: 2.0
+  saturation: -1.5
+  duplication: -2.0

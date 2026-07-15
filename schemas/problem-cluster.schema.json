@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.demand-radar.dev/problem-cluster/1",
+  "title": "ProblemCluster",
+  "description": "A deterministic grouping of classifications that describe the same underlying problem. Assembled by candidate grouping + agent-assisted naming, but membership is validated deterministically: every id here must exist and be uniquely counted.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "id", "product", "label", "canonical_problem",
+    "member_evidence_ids", "independence", "signals", "first_seen", "last_seen"
+  ],
+  "properties": {
+    "schema": { "const": "demand-radar.problem-cluster/1" },
+    "id": { "type": "string", "pattern": "^cluster_[a-zA-Z0-9_-]+$" },
+    "product": { "type": "string", "minLength": 1, "maxLength": 60, "pattern": "^[a-z0-9-]+$" },
+    "label": { "type": "string", "minLength": 1, "maxLength": 100 },
+    "canonical_problem": { "type": "string", "minLength": 1, "maxLength": 400 },
+    "member_evidence_ids": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^ev_[a-zA-Z0-9_-]+$" }
+    },
+    "independence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unique_authors", "source_families", "duplicate_groups"],
+      "properties": {
+        "unique_authors": { "type": "integer", "minimum": 0 },
+        "source_families": { "type": "integer", "minimum": 0 },
+        "duplicate_groups": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "signals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["frequency", "growth", "pain", "urgency", "commercial_intent", "commitment", "product_fit", "saturation"],
+      "properties": {
+        "frequency": { "type": "number", "minimum": 0, "maximum": 1 },
+        "growth": { "type": "number", "minimum": 0, "maximum": 1 },
+        "pain": { "type": "number", "minimum": 0, "maximum": 1 },
+        "urgency": { "type": "number", "minimum": 0, "maximum": 1 },
+        "commercial_intent": { "type": "number", "minimum": 0, "maximum": 1 },
+        "commitment": { "type": "number", "minimum": 0, "maximum": 1 },
+        "product_fit": { "type": "number", "minimum": 0, "maximum": 1 },
+        "saturation": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "first_seen": { "type": "string", "format": "date-time" },
+    "last_seen": { "type": "string", "format": "date-time" }
+  }
+}

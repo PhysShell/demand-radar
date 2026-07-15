@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.demand-radar.dev/opportunity-card/1",
+  "title": "OpportunityCard",
+  "description": "The canonical stored/reported shape. status and signals.demand_score/confidence are always code-computed (scoring/judge.py) — never taken verbatim from an LLM response, even though the analyst proposes the surrounding content. See docs/architecture.md for the candidate-to-card assembly boundary.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "id", "product", "cluster_ids", "problem", "persona", "context",
+    "evidence", "signals", "current_workarounds", "existing_substitutes",
+    "possible_wedges", "risks", "cheapest_experiment", "status"
+  ],
+  "properties": {
+    "schema": { "const": "demand-radar.opportunity-card/1" },
+    "id": { "type": "string", "pattern": "^opp_[a-zA-Z0-9_-]+$" },
+    "product": { "type": "string", "minLength": 1, "maxLength": 60, "pattern": "^[a-z0-9-]+$" },
+    "cluster_ids": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^cluster_[a-zA-Z0-9_-]+$" }
+    },
+    "problem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["statement"],
+      "properties": {
+        "statement": { "type": "string", "minLength": 1, "maxLength": 500 }
+      }
+    },
+    "persona": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["primary"],
+      "properties": {
+        "primary": { "type": "string", "minLength": 1, "maxLength": 120 }
+      }
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["situation"],
+      "properties": {
+        "situation": { "type": "string", "minLength": 1, "maxLength": 500 }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidence_ids", "unique_authors", "source_families"],
+      "properties": {
+        "evidence_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^ev_[a-zA-Z0-9_-]+$" }
+        },
+        "unique_authors": { "type": "integer", "minimum": 0 },
+        "source_families": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "signals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["demand_score", "confidence"],
+      "properties": {
+        "demand_score": {
+          "type": "number",
+          "minimum": 0,
+          "description": "A ranking heuristic (scoring/demand_score.py), not a market-size estimate or probability of success. See docs/scoring.md."
+        },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "current_workarounds": {
+      "type": "array",
+      "maxItems": 15,
+      "items": { "type": "string", "minLength": 1, "maxLength": 300 }
+    },
+    "existing_substitutes": {
+      "type": "array",
+      "maxItems": 15,
+      "items": { "type": "string", "minLength": 1, "maxLength": 200 }
+    },
+    "possible_wedges": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "offer"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["concierge_service", "cli", "desktop_tool", "browser_extension", "plugin", "saas", "other"]
+          },
+          "offer": { "type": "string", "minLength": 1, "maxLength": 300 }
+        }
+      }
+    },
+    "risks": {
+      "type": "array",
+      "maxItems": 15,
+      "items": { "type": "string", "minLength": 1, "maxLength": 300 }
+    },
+    "cheapest_experiment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hypothesis", "input", "output", "commitment_event", "success_threshold", "failure_threshold"],
+      "properties": {
+        "hypothesis": { "type": "string", "minLength": 1, "maxLength": 400 },
+        "input": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "output": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "commitment_event": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "success_threshold": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "failure_threshold": { "type": "string", "minLength": 1, "maxLength": 300 }
+      }
+    },
+    "status": {
+      "type": "string",
+      "enum": ["observed", "investigate", "experiment_ready", "rejected", "externally_validated"],
+      "description": "externally_validated is never set by this pipeline; it is a human-entered status once real behavioral evidence (download, reuse, install, repo transfer, payment) is recorded."
+    },
+    "rejection_reasons": {
+      "type": "array",
+      "maxItems": 20,
+      "items": { "type": "string", "minLength": 1, "maxLength": 300 },
+      "description": "Populated by the deterministic judge whenever status is investigate or rejected -- the specific gate(s) that blocked experiment_ready. Omitted for observed/experiment_ready/externally_validated."
+    }
+  }
+}

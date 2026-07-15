@@ -1,0 +1,60 @@
+# OwnAudit MVP profile — spec section 11.1.
+# OwnAudit is the real acceptance-fixture focus for this MVP (see fixtures/).
+config_version: 1
+product: own-audit
+display_name: "OwnAudit — legacy .NET/WPF audit tooling"
+
+problem_queries:
+  - "WPF memory leak analyzer"
+  - "legacy .NET code audit"
+  - ".NET Framework modernization assessment"
+  - "NDepend alternative"
+  - "Roslyn architecture analyzer"
+  - "find tightly coupled C# classes"
+  - "PropertyChanged performance WPF"
+  - "large .NET solution analysis"
+  - "C# technical debt report"
+  - "WPF high memory usage"
+
+personas:
+  - "legacy .NET maintainer"
+  - "WPF developer"
+  - "technical lead"
+  - "software modernization consultant"
+  - "engineering manager"
+
+positive_examples:
+  - "We wrote a custom analyzer because existing tools do not..."
+  - "How do I identify the ownership path causing this WPF leak?"
+  - "Is there an NDepend alternative for a large .NET Framework solution?"
+  - "The profiler finds retained objects but does not tell us what to fix."
+
+negative_examples:
+  - "WPF beginner tutorial"
+  - "C# interview questions"
+  - "How to install Visual Studio"
+  - "New language syntax announcement"
+  - "Generic .NET news"
+
+# Real-mode defaults (spec section 16). Not lowered for fixtures — the
+# fixture dataset is built to clear these thresholds honestly.
+thresholds:
+  minimum_unique_authors: 3
+  minimum_source_families: 2
+  minimum_problem_evidence: 3
+  minimum_workaround_evidence: 1
+
+deduplication:
+  similarity_threshold: 0.5
+
+scoring_weights:
+  frequency: 1.0
+  recent_growth: 1.5
+  pain: 2.0
+  urgency: 1.5
+  commercial_intent: 2.5
+  commitment: 4.0
+  product_fit: 2.0
+  source_diversity: 2.0
+  saturation: -1.5
+  duplication: -2.0

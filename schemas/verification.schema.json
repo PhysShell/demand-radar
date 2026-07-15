@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.demand-radar.dev/verification/1",
+  "title": "Verification",
+  "description": "Machine-readable result written at the end of every run. Hashes are plain sha256 of the named artifact — this is a reproducibility record, not a cryptographic chain-of-custody guarantee.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "run_id", "verdict", "checks", "artifacts"],
+  "properties": {
+    "schema": { "const": "demand-radar.verification/1" },
+    "run_id": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "verdict": { "type": "string", "enum": ["PASS", "FAIL", "BLOCKED"] },
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemas_valid", "evidence_refs_valid", "duplicate_inflation_absent",
+        "deterministic_rules_passed", "report_generated", "analyst_status", "critic_status"
+      ],
+      "properties": {
+        "schemas_valid": { "type": "string", "enum": ["PASS", "FAIL"] },
+        "evidence_refs_valid": { "type": "string", "enum": ["PASS", "FAIL"] },
+        "duplicate_inflation_absent": { "type": "string", "enum": ["PASS", "FAIL"] },
+        "deterministic_rules_passed": { "type": "string", "enum": ["PASS", "FAIL"] },
+        "report_generated": { "type": "string", "enum": ["PASS", "FAIL"] },
+        "analyst_status": {
+          "type": "string",
+          "enum": ["PASS", "BLOCKED_AUTH", "BLOCKED_USAGE", "BLOCKED_TIMEOUT", "BLOCKED_NOT_INSTALLED", "FAIL_INVALID_OUTPUT", "FAIL_SCHEMA", "NOT_RUN"]
+        },
+        "critic_status": {
+          "type": "string",
+          "enum": ["PASS", "BLOCKED_AUTH", "BLOCKED_USAGE", "BLOCKED_TIMEOUT", "BLOCKED_NOT_INSTALLED", "FAIL_INVALID_OUTPUT", "FAIL_SCHEMA", "NOT_RUN"]
+        }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input_manifest_hash", "opportunities_hash", "report_hash"],
+      "properties": {
+        "input_manifest_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "opportunities_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "report_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+      }
+    }
+  }
+}

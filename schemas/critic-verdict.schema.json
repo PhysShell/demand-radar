@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.demand-radar.dev/critic-verdict/1",
+  "title": "CriticVerdict",
+  "description": "Codex critique of one opportunity candidate. recommended_status is a recommendation only — the deterministic judge (scoring/judge.py) computes the actual OpportunityCard.status, taking fatal objections as one input among several. The critic's job is to find reasons to reject, not to improve the pitch.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "opportunity_id", "recommended_status", "objections", "overclaim_check", "notes"],
+  "properties": {
+    "schema": { "const": "demand-radar.critic-verdict/1" },
+    "opportunity_id": { "type": "string", "pattern": "^opp_[a-zA-Z0-9_-]+$" },
+    "recommended_status": {
+      "type": "string",
+      "enum": ["experiment_ready", "investigate", "rejected"],
+      "description": "Non-authoritative. observed and externally_validated are not recommendable by a critic."
+    },
+    "objections": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "statement", "evidence_ids", "fatal"],
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "complaint_not_purchase_intent",
+              "single_viral_source_dominant",
+              "duplicate_or_copied_content",
+              "audience_lacks_budget",
+              "free_substitute_sufficient",
+              "educational_not_commercial",
+              "removes_enjoyable_activity",
+              "required_input_unavailable",
+              "implementation_cost_dominates",
+              "evidence_supports_different_wedge",
+              "overclaims_evidence",
+              "other"
+            ]
+          },
+          "statement": { "type": "string", "minLength": 1, "maxLength": 400 },
+          "evidence_ids": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "type": "string", "pattern": "^ev_[a-zA-Z0-9_-]+$" },
+            "description": "May be empty when the objection is about an absence of evidence rather than a specific item."
+          },
+          "fatal": {
+            "type": "boolean",
+            "description": "True means this objection alone should block experiment_ready. The judge, not the critic, has final say."
+          }
+        }
+      }
+    },
+    "overclaim_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["overclaims", "statement"],
+      "properties": {
+        "overclaims": { "type": "boolean" },
+        "statement": { "type": "string", "maxLength": 400 }
+      }
+    },
+    "notes": { "type": "string", "maxLength": 500 }
+  }
+}

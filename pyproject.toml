@@ -1,0 +1,63 @@
+[project]
+name = "demand-radar"
+version = "0.1.0"
+description = "Evidence-backed opportunity discovery: public evidence -> normalized, deduplicated, clustered problems -> critiqued, deterministically judged opportunity cards. Not an idea generator."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+dependencies = [
+  "langgraph>=0.2.60,<0.3",
+  "langgraph-checkpoint-sqlite>=2.0.0,<3",
+  "pydantic>=2.9,<3",
+  "typer>=0.15.1,<0.16",
+  "jsonschema>=4.23,<5",
+  "pyyaml>=6.0.2,<7",
+]
+
+[project.scripts]
+demand-radar = "demand_radar.cli:app"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3.4,<9",
+  "ruff>=0.8.4,<0.9",
+  "mypy>=1.14.1,<2",
+  "types-pyyaml>=6.0.12.20241221,<7",
+  "types-jsonschema>=4.23.0.20241208,<5",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/demand_radar"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP", "C4", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src"]
+strict = true
+plugins = []
+
+[[tool.mypy.overrides]]
+module = "langgraph.*"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = [
+  # Upstream langgraph-checkpoint notice about a *future* default-value change
+  # to an internal serializer flag; not something this project's code triggers
+  # or can silence at the call site. Safe to ignore until langgraph ships the
+  # change, at which point this line should be revisited.
+  "ignore:The default value of `allowed_objects` will change in a future version.*:langchain_core._api.deprecation.LangChainPendingDeprecationWarning",
+]

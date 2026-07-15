@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.demand-radar.dev/classification/1",
+  "title": "Classification",
+  "description": "Analyst (Claude) extraction for exactly one evidence item. Short structured claims only — never a retelling of the source. Every non-boolean claim must be traceable to evidence_spans in the cited evidence item.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "evidence_id", "relevance", "persona", "situation", "problem",
+    "desired_outcome", "current_workarounds", "signals", "mentioned_tools", "evidence_spans"
+  ],
+  "properties": {
+    "schema": { "const": "demand-radar.classification/1" },
+    "evidence_id": {
+      "type": "string",
+      "pattern": "^ev_[a-zA-Z0-9_-]+$",
+      "description": "Must equal the evidence item this classification was generated for; checked against the known evidence store, not trusted blindly."
+    },
+    "relevance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["product_fit", "confidence", "relevant"],
+      "properties": {
+        "product_fit": { "type": "number", "minimum": 0, "maximum": 1 },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "relevant": {
+          "type": "boolean",
+          "description": "False for off-topic/news/tutorial content (see product config negative_examples). Irrelevant items are excluded from clustering."
+        }
+      }
+    },
+    "persona": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label"],
+      "properties": {
+        "label": { "type": "string", "minLength": 1, "maxLength": 80 }
+      }
+    },
+    "situation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["statement"],
+      "properties": {
+        "statement": { "type": "string", "minLength": 1, "maxLength": 400 }
+      }
+    },
+    "problem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["statement", "problem_key"],
+      "properties": {
+        "statement": { "type": "string", "minLength": 1, "maxLength": 400 },
+        "problem_key": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+          "maxLength": 80,
+          "description": "Slug used as a deterministic clustering seed, e.g. missing-memory-ownership-path."
+        }
+      }
+    },
+    "desired_outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["statement"],
+      "properties": {
+        "statement": { "type": "string", "minLength": 1, "maxLength": 400 }
+      }
+    },
+    "current_workarounds": {
+      "type": "array",
+      "maxItems": 10,
+      "items": { "type": "string", "minLength": 1, "maxLength": 200 }
+    },
+    "signals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pain", "urgency", "commercial_intent", "commitment"],
+      "properties": {
+        "pain": { "type": "number", "minimum": 0, "maximum": 1 },
+        "urgency": { "type": "number", "minimum": 0, "maximum": 1 },
+        "commercial_intent": { "type": "number", "minimum": 0, "maximum": 1 },
+        "commitment": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "mentioned_tools": {
+      "type": "array",
+      "maxItems": 20,
+      "items": { "type": "string", "minLength": 1, "maxLength": 60 }
+    },
+    "evidence_spans": {
+      "type": "array",
+      "description": "Every extracted claim above must be grounded by at least one span into the evidence item's raw_text.",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["start", "end", "supports"],
+        "properties": {
+          "start": { "type": "integer", "minimum": 0 },
+          "end": { "type": "integer", "minimum": 0 },
+          "supports": {
+            "type": "string",
+            "enum": ["persona", "situation", "problem", "desired_outcome", "workaround", "commercial_intent", "urgency", "pain"]
+          }
+        }
+      }
+    }
+  }
+}

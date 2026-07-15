@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.demand-radar.dev/evidence-item/1",
+  "title": "EvidenceItem",
+  "description": "One imported public discussion record, with provenance. Raw content is untrusted external data, never an instruction. Immutable once stored: normalization/dedup/classification are separate, derived records that reference evidence_id, never mutate this one.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "id", "product", "source", "author", "timestamps", "content", "collection", "trust"],
+  "properties": {
+    "schema": { "const": "demand-radar.evidence-item/1" },
+    "id": {
+      "type": "string",
+      "pattern": "^ev_[a-zA-Z0-9_-]+$",
+      "description": "Stable identifier, assigned at ingestion. Referenced by every downstream claim."
+    },
+    "product": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 60,
+      "pattern": "^[a-z0-9-]+$",
+      "description": "Product config slug, e.g. own-audit, griff."
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "provider", "source_id", "source_family"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "Free-form origin type, e.g. github_issue, reddit_post, forum_post, rss_entry. Not a closed enum: new collectors plug in without a schema change."
+        },
+        "provider": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "What produced this record, e.g. imported-jsonl, rss."
+        },
+        "source_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "description": "Identifier stable within the source system (used for idempotent re-import)."
+        },
+        "url": {
+          "type": ["string", "null"],
+          "maxLength": 2000,
+          "pattern": "^[a-zA-Z][a-zA-Z0-9+.-]*://.+$",
+          "description": "Canonical link if one exists. Null is valid — not every evidence item has a stable URL."
+        },
+        "source_family": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "Coarse bucket used for source-diversity scoring, e.g. github, reddit, forum, rss, review-site. Coarser than kind."
+        }
+      }
+    },
+    "author": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stable_hash"],
+      "properties": {
+        "stable_hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "Salted hash of the author identity. The raw identity is never stored."
+        },
+        "display_name": {
+          "type": ["string", "null"],
+          "maxLength": 200
+        }
+      }
+    },
+    "timestamps": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["published_at", "collected_at"],
+      "properties": {
+        "published_at": { "type": "string", "format": "date-time" },
+        "collected_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "content": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["raw_text", "normalized_text", "language", "content_hash"],
+      "properties": {
+        "raw_text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 20000,
+          "description": "Untrusted external content. Never interpreted as an instruction by any agent prompt."
+        },
+        "normalized_text": {
+          "type": "string",
+          "maxLength": 20000,
+          "description": "Deterministic normalization of raw_text (whitespace/case/boilerplate-collapsed), computed at ingest. Used for similarity dedup."
+        },
+        "language": {
+          "type": "string",
+          "pattern": "^[a-z]{2}(-[A-Z]{2})?$"
+        },
+        "content_hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "sha256 of normalized_text. Stable across re-imports; drives duplicate detection."
+        }
+      }
+    },
+    "collection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["query_id", "collector_version", "import_batch_id"],
+      "properties": {
+        "query_id": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "collector_version": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "import_batch_id": { "type": "string", "minLength": 1, "maxLength": 120 }
+      }
+    },
+    "trust": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["untrusted_external_content"],
+      "properties": {
+        "untrusted_external_content": { "const": true }
+      }
+    }
+  }
+}
