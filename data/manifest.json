@@ -1,0 +1,260 @@
+{
+  "accepted_count": 100,
+  "accepted_per_query": {
+    "architecture-dependency-cycle": 5,
+    "csharp-memory-leak": 17,
+    "dependencyproperty-retention": 1,
+    "event-handler-retention": 17,
+    "idisposable-ownership": 17,
+    "large-wpf-performance": 11,
+    "memory-profiler-root-cause": 5,
+    "propertychanged-performance": 9,
+    "systemevents-retention": 0,
+    "wpf-memory-leak": 18
+  },
+  "api_site": "stackoverflow",
+  "api_version": "2.3",
+  "body_truncate_chars": 8000,
+  "collection_timestamp": "2026-07-15T22:15:40.901753+00:00",
+  "count_by_content_license": {
+    "CC BY-SA 4.0": 100
+  },
+  "duplicate_count": 7,
+  "eligible_per_query_before_cap": {
+    "architecture-dependency-cycle": 5,
+    "csharp-memory-leak": 26,
+    "dependencyproperty-retention": 1,
+    "event-handler-retention": 21,
+    "idisposable-ownership": 17,
+    "large-wpf-performance": 11,
+    "memory-profiler-root-cause": 5,
+    "propertychanged-performance": 9,
+    "systemevents-retention": 0,
+    "wpf-memory-leak": 28
+  },
+  "eligible_total_before_cap": 123,
+  "excluded_by_cap_per_query": {
+    "architecture-dependency-cycle": 0,
+    "csharp-memory-leak": 9,
+    "dependencyproperty-retention": 0,
+    "event-handler-retention": 4,
+    "idisposable-ownership": 0,
+    "large-wpf-performance": 0,
+    "memory-profiler-root-cause": 0,
+    "propertychanged-performance": 0,
+    "systemevents-retention": 0,
+    "wpf-memory-leak": 10
+  },
+  "excluded_counts": {
+    "deleted_owner": 3,
+    "missing_required_field": 10
+  },
+  "excluded_total": 13,
+  "fetched_per_query": {
+    "architecture-dependency-cycle": 5,
+    "csharp-memory-leak": 30,
+    "dependencyproperty-retention": 1,
+    "event-handler-retention": 30,
+    "idisposable-ownership": 19,
+    "large-wpf-performance": 11,
+    "memory-profiler-root-cause": 5,
+    "propertychanged-performance": 11,
+    "systemevents-retention": 1,
+    "wpf-memory-leak": 30
+  },
+  "fetched_total": 143,
+  "file_sha256": {
+    "evidence_jsonl": "sha256:8232ab76183f23c22e7e9fd5e7815b57867bda28215782e3c20d34055ee35d9e",
+    "provenance_jsonl": "sha256:7841baec3d3a53a8946404bc7dd225e928fb8830f5dcf972740883b414104710"
+  },
+  "max_records": 100,
+  "over_max_records_cap_count": 23,
+  "product": "own-audit",
+  "query_parameters": {
+    "filter": "withbody",
+    "from_date": "2018-05-02",
+    "order": "desc",
+    "page_size": 30,
+    "queries": [
+      {
+        "id": "wpf-memory-leak",
+        "q": "memory leak",
+        "tagged": [
+          "wpf"
+        ]
+      },
+      {
+        "id": "csharp-memory-leak",
+        "q": "memory leak",
+        "tagged": [
+          "c#"
+        ]
+      },
+      {
+        "id": "memory-profiler-root-cause",
+        "q": "memory profiler retained object",
+        "tagged": [
+          "c#"
+        ]
+      },
+      {
+        "id": "event-handler-retention",
+        "q": "event handler memory leak",
+        "tagged": [
+          "c#"
+        ]
+      },
+      {
+        "id": "idisposable-ownership",
+        "q": "IDisposable dispose memory leak",
+        "tagged": [
+          "c#"
+        ]
+      },
+      {
+        "id": "propertychanged-performance",
+        "q": "PropertyChanged performance",
+        "tagged": [
+          "wpf"
+        ]
+      },
+      {
+        "id": "dependencyproperty-retention",
+        "q": "DependencyPropertyDescriptor AddValueChanged",
+        "tagged": [
+          "wpf"
+        ]
+      },
+      {
+        "id": "systemevents-retention",
+        "q": "SystemEvents memory leak",
+        "tagged": [
+          "c#"
+        ]
+      },
+      {
+        "id": "large-wpf-performance",
+        "q": "large WPF application performance",
+        "tagged": [
+          "wpf"
+        ]
+      },
+      {
+        "id": "architecture-dependency-cycle",
+        "q": "dependency cycle architecture",
+        "tagged": [
+          "c#"
+        ]
+      }
+    ],
+    "sort": "creation"
+  },
+  "quota_max": 300,
+  "quota_remaining": 288,
+  "request_commit_sha": "151e1b678cb53d9af91265914a183cdb0faaa995",
+  "schema": "demand-radar.stackoverflow-acquisition-manifest/1 (NOT a production schema)",
+  "selection_strategy": "round_robin_by_query_order_then_source_id_sort",
+  "truncated_body_count": 15,
+  "unique_author_count": 98,
+  "unique_authors": [
+    "stackoverflow:user:10221639",
+    "stackoverflow:user:10827339",
+    "stackoverflow:user:10921675",
+    "stackoverflow:user:112829",
+    "stackoverflow:user:11441237",
+    "stackoverflow:user:1152054",
+    "stackoverflow:user:11575127",
+    "stackoverflow:user:11736658",
+    "stackoverflow:user:11822322",
+    "stackoverflow:user:12321905",
+    "stackoverflow:user:12417300",
+    "stackoverflow:user:12427812",
+    "stackoverflow:user:1250666",
+    "stackoverflow:user:1262566",
+    "stackoverflow:user:1383366",
+    "stackoverflow:user:14126685",
+    "stackoverflow:user:14207973",
+    "stackoverflow:user:1444493",
+    "stackoverflow:user:14664018",
+    "stackoverflow:user:15249237",
+    "stackoverflow:user:1638842",
+    "stackoverflow:user:16512410",
+    "stackoverflow:user:16612295",
+    "stackoverflow:user:16617172",
+    "stackoverflow:user:16844284",
+    "stackoverflow:user:17106033",
+    "stackoverflow:user:17145056",
+    "stackoverflow:user:171860",
+    "stackoverflow:user:1721136",
+    "stackoverflow:user:17478939",
+    "stackoverflow:user:17616670",
+    "stackoverflow:user:1786596",
+    "stackoverflow:user:1792734",
+    "stackoverflow:user:1851717",
+    "stackoverflow:user:1865613",
+    "stackoverflow:user:19281046",
+    "stackoverflow:user:19311518",
+    "stackoverflow:user:1932803",
+    "stackoverflow:user:19336333",
+    "stackoverflow:user:19740032",
+    "stackoverflow:user:20234071",
+    "stackoverflow:user:20434896",
+    "stackoverflow:user:20913066",
+    "stackoverflow:user:21082741",
+    "stackoverflow:user:21220275",
+    "stackoverflow:user:2181056",
+    "stackoverflow:user:2212458",
+    "stackoverflow:user:22447336",
+    "stackoverflow:user:23048171",
+    "stackoverflow:user:23200127",
+    "stackoverflow:user:23577667",
+    "stackoverflow:user:23715785",
+    "stackoverflow:user:23761619",
+    "stackoverflow:user:2417459",
+    "stackoverflow:user:2675038",
+    "stackoverflow:user:2675609",
+    "stackoverflow:user:2695563",
+    "stackoverflow:user:27323066",
+    "stackoverflow:user:29814279",
+    "stackoverflow:user:2987066",
+    "stackoverflow:user:30026171",
+    "stackoverflow:user:305813",
+    "stackoverflow:user:31206324",
+    "stackoverflow:user:31557685",
+    "stackoverflow:user:3190036",
+    "stackoverflow:user:32061584",
+    "stackoverflow:user:3433178",
+    "stackoverflow:user:3601219",
+    "stackoverflow:user:3687628",
+    "stackoverflow:user:3849761",
+    "stackoverflow:user:3853028",
+    "stackoverflow:user:4139729",
+    "stackoverflow:user:4247806",
+    "stackoverflow:user:426227",
+    "stackoverflow:user:4619055",
+    "stackoverflow:user:475727",
+    "stackoverflow:user:488397",
+    "stackoverflow:user:492526",
+    "stackoverflow:user:5265160",
+    "stackoverflow:user:5335653",
+    "stackoverflow:user:573870",
+    "stackoverflow:user:5791922",
+    "stackoverflow:user:6006981",
+    "stackoverflow:user:6518526",
+    "stackoverflow:user:6619603",
+    "stackoverflow:user:6723178",
+    "stackoverflow:user:7207280",
+    "stackoverflow:user:722393",
+    "stackoverflow:user:7790628",
+    "stackoverflow:user:7857859",
+    "stackoverflow:user:7911230",
+    "stackoverflow:user:8092396",
+    "stackoverflow:user:8138304",
+    "stackoverflow:user:814891",
+    "stackoverflow:user:8695110",
+    "stackoverflow:user:9358955",
+    "stackoverflow:user:9446665",
+    "stackoverflow:user:9511895"
+  ],
+  "workflow_run_id": "29454774085"
+}
