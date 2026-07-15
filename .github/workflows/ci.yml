@@ -1,0 +1,63 @@
+# Phase 2C milestone 2C0 -- published CI quality gate.
+#
+# Every prior arbitration verdict in this project had to trust this agent's
+# own report of "ruff/mypy/pytest all green" -- there was no independently
+# checkable evidence beyond that self-report. This workflow closes that gap:
+# it runs the same four gate commands documented in AGENTS.md/README.md on a
+# GitHub-hosted runner, on every push and pull request, and publishes one
+# named status check (`quality-gate`) that anyone can inspect without
+# trusting this agent's word for it.
+name: ci
+
+"on":
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality-gate:
+    name: quality-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv (exact pinned version via pip, not a floating install script)
+        run: |
+          python3 -m pip install --disable-pip-version-check --quiet "uv==0.8.17"
+          uv --version
+
+      - name: uv sync --frozen (uses the committed uv.lock as-is; fails on drift
+          rather than silently re-resolving)
+        run: uv sync --frozen --group dev
+
+      - name: ruff check .
+        run: uv run ruff check .
+
+      - name: ruff format --check .
+        run: uv run ruff format --check .
+
+      - name: mypy --strict src
+        run: uv run mypy --strict src
+
+      - name: pytest
+        # No live Claude/Codex/API execution and no repository secrets are
+        # needed: the suite's only real-provider-shaped tests
+        # (test_run_refuses_same_provider_for_analyst_and_critic,
+        # test_run_refuses_codex_for_untrusted_zone_2) assert the CLI's
+        # provider guard rejects those combinations *before* any AgentRunner
+        # is constructed; every test that actually executes a run uses
+        # `--analyst fake --critic fake` (FakeRunner, fully offline).
+        run: uv run pytest
