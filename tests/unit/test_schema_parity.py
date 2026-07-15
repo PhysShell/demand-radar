@@ -16,6 +16,7 @@ from demand_radar.models import (
     EvidenceItem,
     OpportunityCard,
     ProblemCluster,
+    ReviewEnvelope,
     Verification,
 )
 
@@ -36,6 +37,7 @@ def _validate_against_schema(payload: dict, schema_file: str) -> None:
         "opportunity-card.schema.json",
         "critic-verdict.schema.json",
         "verification.schema.json",
+        "review-envelope.schema.json",
     ],
 )
 def test_schema_file_is_valid_json_schema(schema_file: str) -> None:
@@ -206,6 +208,41 @@ def test_verification_round_trips_through_schema() -> None:
     )
     dumped = json.loads(verification.model_dump_json(by_alias=True, exclude_none=True))
     _validate_against_schema(dumped, "verification.schema.json")
+
+
+def test_review_envelope_round_trips_through_schema() -> None:
+    envelope = ReviewEnvelope.model_validate(
+        {
+            "schema": "demand-radar.review-envelope/1",
+            "run_id": "run-1",
+            "opportunity_id": "opp_abc123",
+            "reviewer": {"kind": "human", "id": "reviewer-1", "conflict": "none"},
+            "reviewed_at": "2026-07-15T00:00:00Z",
+            "opportunity_hash": f"sha256:{'a' * 64}",
+            "evidence_manifest_hash": f"sha256:{'b' * 64}",
+            "attestation": {
+                "reviewed_primary_evidence": True,
+                "review_not_generated_by_analyst_provider": True,
+            },
+            "verdict": {
+                "schema": "demand-radar.critic-verdict/1",
+                "opportunity_id": "opp_abc123",
+                "recommended_status": "investigate",
+                "objections": [
+                    {
+                        "code": "audience_lacks_budget",
+                        "statement": "no budget",
+                        "evidence_ids": [],
+                        "fatal": False,
+                    }
+                ],
+                "overclaim_check": {"overclaims": False, "statement": "fine"},
+                "notes": "ok",
+            },
+        }
+    )
+    dumped = json.loads(envelope.model_dump_json(by_alias=True, exclude_none=True))
+    _validate_against_schema(dumped, "review-envelope.schema.json")
 
 
 def test_unknown_field_rejected_by_model() -> None:

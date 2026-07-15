@@ -249,6 +249,20 @@ def generate_opportunities(state: DemandState, config: dict[str, Any]) -> dict[s
 
 def critic_review(state: DemandState, config: dict[str, Any]) -> dict[str, Any]:
     ctx = get_ctx(config)
+    if ctx.critic_name == "human":
+        # Explicit deferred-review mode (Phase 2C), not a fallback: no
+        # AgentRunner call, no CriticVerdict stored here at all --
+        # ctx.critic_runner is a NeverCalledRunner for this mode, so a
+        # future bug that accidentally called it would fail loudly rather
+        # than silently faking a verdict. Zero calls + zero "critic_review"
+        # -tagged errors makes derive_agent_status() report NOT_RUN, which
+        # overall_verdict() already treats as BLOCKED (verification.py) --
+        # "human review pending", never a schema failure. `demand-radar
+        # review import` is the only path that ever writes a CriticVerdict
+        # when this mode is used; `demand-radar finalize` re-judges once it
+        # has.
+        return {"critic_run_id": None, "errors": []}
+
     errors: list[dict[str, Any]] = []
     schema_path = ctx.schemas_dir / "critic-verdict.schema.json"
     base_dir = ctx.run_dir / "agents" / "critic" / "critic_review"

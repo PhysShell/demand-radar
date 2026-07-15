@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.demand-radar.dev/critic-verdict/1",
   "title": "CriticVerdict",
-  "description": "Codex critique of one opportunity candidate. recommended_status is a recommendation only — the deterministic judge (scoring/judge.py) computes the actual OpportunityCard.status, taking fatal objections as one input among several. The critic's job is to find reasons to reject, not to improve the pitch.",
+  "description": "independent critique of one opportunity candidate. recommended_status is a recommendation only — the deterministic judge (scoring/judge.py) computes the actual OpportunityCard.status, taking fatal objections as one input among several. The critic's job is to find reasons to reject, not to improve the pitch. The critic may be a live agent call (--critic claude) or an imported structured human review (--critic human, see schemas/review-envelope.schema.json) -- this schema and every field/objection code below is identical either way.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema", "opportunity_id", "recommended_status", "objections", "overclaim_check", "notes"],

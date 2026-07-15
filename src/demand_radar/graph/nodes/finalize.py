@@ -136,7 +136,15 @@ def render_report(state: DemandState, config: dict[str, Any]) -> dict[str, Any]:
     ]
 
     analyst_produced_any = bool(state["classifications"]) or bool(state["opportunity_ids"])
-    critic_produced_any = bool(critic_verdicts)
+    # Every opportunity must have a verdict for critic_status to read PASS --
+    # not just one. This matters most for --critic human (Phase 2C): a
+    # partial imported-review set must not read as a completed critic pass
+    # (see demand-radar review import's "critic_status != PASS until every
+    # opportunity in the run has a valid imported review"). It also
+    # corrects a latent imprecision for the agent-critic path: if
+    # critic_review breaks off after reviewing only some opportunities
+    # non-systemically, that is honestly "incomplete", not "PASS".
+    critic_produced_any = bool(opportunities) and len(critic_verdicts) == len(opportunities)
     pre_checks = compute_checks(
         store=ctx.store,
         product=state["product"],
@@ -183,7 +191,9 @@ def render_report(state: DemandState, config: dict[str, Any]) -> dict[str, Any]:
 def verify_run(state: DemandState, config: dict[str, Any]) -> dict[str, Any]:
     ctx = get_ctx(config)
     opportunities = ctx.store.list_opportunity_cards_for_run(state["run_id"])
-    critic_verdicts_present = any(
+    # See render_report's identical fix above: every opportunity, not just
+    # one, must have a verdict for critic_status to read PASS.
+    critic_verdicts_present = bool(opportunities) and all(
         ctx.store.get_critic_verdict(card.id) is not None for card in opportunities
     )
 

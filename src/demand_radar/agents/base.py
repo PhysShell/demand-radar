@@ -41,6 +41,33 @@ class AgentRunner(Protocol):
     ) -> AgentResult: ...
 
 
+class NeverCalledRunner:
+    """An `AgentRunner` whose `.run()` always raises. Used wherever a role
+    must structurally never invoke an agent -- `--critic human` (the human
+    review deferral mode: critic_review skips the loop entirely, but this
+    still backs `RunContext.critic_runner` so an accidental future call
+    fails loudly instead of silently producing a bogus verdict) and
+    `demand-radar finalize` (deterministic_judge/render_report/verify_run
+    never call an agent; this is the "crash on any call" double proving
+    that in both production and tests, not just tests).
+    """
+
+    def run(
+        self,
+        *,
+        task_id: str,
+        prompt: str,
+        input_paths: Sequence[Path],
+        output_schema: Path,
+        capability_profile: str,
+        run_dir: Path,
+    ) -> AgentResult:
+        raise AssertionError(
+            f"NeverCalledRunner.run() invoked for task_id={task_id!r} -- this role must "
+            f"never call an agent"
+        )
+
+
 def sha256_text(text: str) -> str:
     return f"sha256:{hashlib.sha256(text.encode('utf-8')).hexdigest()}"
 

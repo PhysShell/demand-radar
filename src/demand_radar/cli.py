@@ -14,7 +14,7 @@ import typer
 from langchain_core.runnables import RunnableConfig
 
 from demand_radar import _warnings  # noqa: F401
-from demand_radar.agents.base import AgentRunner
+from demand_radar.agents.base import AgentRunner, NeverCalledRunner, sha256_file
 from demand_radar.agents.fake import FakeRunner
 from demand_radar.config import ProductConfig, load_product_config_by_name
 from demand_radar.graph.build import build_graph, open_checkpointer, run_or_resume
@@ -22,6 +22,13 @@ from demand_radar.graph.state import DemandState, RunContext, initial_state
 from demand_radar.ingest.jsonl import ingest_jsonl_file
 from demand_radar.ingest.rss import ingest_rss_feed
 from demand_radar.models import EvidenceItem
+from demand_radar.review import (
+    FinalizeError,
+    ReviewError,
+    export_review_packet,
+    finalize_run,
+    import_reviews,
+)
 from demand_radar.storage.sqlite import DatabaseNotInitializedError, Store
 
 app = typer.Typer(
@@ -29,6 +36,8 @@ app = typer.Typer(
 )
 inspect_app = typer.Typer(no_args_is_help=True, help="Look up one stored record by id.")
 app.add_typer(inspect_app, name="inspect")
+review_app = typer.Typer(no_args_is_help=True, help="Export/import a deferred human review packet.")
+app.add_typer(review_app, name="review")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DB = Path("data/demand.db")
@@ -143,7 +152,7 @@ def run(
     product: str = typer.Option(..., "--product"),
     since: str = typer.Option(None, "--since", help="e.g. 30d, 12h, 2w. Omit for all time."),
     analyst: str = typer.Option("fake", "--analyst", help="fake | claude | codex"),
-    critic: str = typer.Option("fake", "--critic", help="fake | claude | codex"),
+    critic: str = typer.Option("fake", "--critic", help="fake | claude | codex | human"),
     db: Path = DB_OPTION,
     runs_dir: Path = RUNS_DIR_OPTION,
     run_id: str = RUN_ID_OPTION,
@@ -199,7 +208,14 @@ def run(
 
     try:
         analyst_runner = get_runner(analyst)
-        critic_runner = get_runner(critic)
+        # "human" is deliberately not a get_runner() branch: it is only ever
+        # legal for --critic (an --analyst human would fall through to
+        # get_runner's existing "unknown runner" refusal, which is correct
+        # -- the analyst role always needs a real generation call). critic_
+        # review's own human-mode skip (graph/nodes/agents.py) never calls
+        # this runner; NeverCalledRunner exists so a future bug that broke
+        # that skip would crash loudly instead of silently faking a verdict.
+        critic_runner = NeverCalledRunner() if critic == "human" else get_runner(critic)
     except typer.Exit:
         store.close()
         raise
@@ -234,6 +250,12 @@ def run(
     verdict = final_state.get("verdict") or "FAIL"
     typer.echo(f"run_id={resolved_run_id} verdict={verdict}")
     typer.echo(f"report: {run_dir / 'outputs' / 'report.md'}")
+    if critic == "human" and verdict == "BLOCKED":
+        typer.echo(
+            "blocked reason: human review pending, not a schema failure -- run "
+            f"`demand-radar review export --run {resolved_run_id} --db {db} "
+            f"--runs-dir {runs_dir} --output <dir>` next"
+        )
     if final_state["errors"]:
         typer.echo(f"{len(final_state['errors'])} error(s) recorded during the run:", err=True)
         for e in final_state["errors"]:
@@ -331,6 +353,131 @@ def _find_run_dir(runs_dir: Path, run_id: str) -> Path | None:
         if candidate.is_dir():
             return candidate
     return None
+
+
+OUTPUT_OPTION = typer.Option(..., "--output", help="Directory to write the review packet into.")
+REVIEW_INPUT_OPTION = typer.Option(..., "--input", exists=True, dir_okay=False)
+
+
+@review_app.command("export")
+def review_export(
+    run_id: str = RUN_OPTION,
+    db: Path = DB_OPTION,
+    runs_dir: Path = RUNS_DIR_OPTION,
+    output: Path = OUTPUT_OPTION,
+) -> None:
+    """Export a review packet (one dir per opportunity, packet-manifest.json,
+    review-guide.md) for an already-completed --critic human run."""
+    run_dir = _find_run_dir(runs_dir, run_id)
+    if run_dir is None:
+        typer.echo(f"error: run {run_id!r} not found under {runs_dir}", err=True)
+        raise typer.Exit(code=1)
+    run_row = None
+    store = _open_store_or_exit(db)
+    try:
+        run_row = store.get_run(run_id)
+        if run_row is None:
+            typer.echo(f"error: run {run_id!r} not found in {db}", err=True)
+            raise typer.Exit(code=1)
+        result = export_review_packet(
+            store=store,
+            run_dir=run_dir,
+            run_id=run_id,
+            product=str(run_row["product"]),
+            output_dir=output,
+            generated_at=datetime.now(UTC),
+        )
+    except ReviewError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    finally:
+        store.close()
+
+    typer.echo(f"review packet written to {result.output_dir}")
+    typer.echo(f"opportunities: {len(result.opportunity_ids)}")
+    for opp_id in result.opportunity_ids:
+        typer.echo(f"  {opp_id}")
+    typer.echo(
+        f"packet-manifest.json sha256: {sha256_file(result.output_dir / 'packet-manifest.json')}"
+    )
+
+
+@review_app.command("import")
+def review_import(
+    run_id: str = RUN_OPTION,
+    input_path: Path = REVIEW_INPUT_OPTION,
+    db: Path = DB_OPTION,
+    runs_dir: Path = RUNS_DIR_OPTION,
+) -> None:
+    """Atomically import a batch of completed review envelopes (JSONL, one
+    ReviewEnvelope per line). Any invalid envelope rejects the whole batch
+    with zero mutation to the store or run_dir."""
+    run_dir = _find_run_dir(runs_dir, run_id)
+    if run_dir is None:
+        typer.echo(f"error: run {run_id!r} not found under {runs_dir}", err=True)
+        raise typer.Exit(code=1)
+    store = _open_store_or_exit(db)
+    try:
+        result = import_reviews(
+            store=store,
+            run_dir=run_dir,
+            run_id=run_id,
+            input_path=input_path,
+            imported_at=datetime.now(UTC),
+        )
+    except ReviewError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    finally:
+        store.close()
+
+    typer.echo(f"imported {len(result.imported_opportunity_ids)} review(s):")
+    for opp_id in result.imported_opportunity_ids:
+        typer.echo(f"  {opp_id}")
+    typer.echo(f"imported file archived at {result.imported_file_path}")
+    typer.echo(f"imported file sha256: {result.imported_file_sha256}")
+
+
+@app.command()
+def finalize(
+    run_id: str = RUN_OPTION,
+    db: Path = DB_OPTION,
+    runs_dir: Path = RUNS_DIR_OPTION,
+) -> None:
+    """Re-runs deterministic_judge -> render_report -> verify_run against the
+    store's current state (after `review import`). Never calls an agent,
+    never reclassifies evidence, never regenerates opportunities."""
+    run_dir = _find_run_dir(runs_dir, run_id)
+    if run_dir is None:
+        typer.echo(f"error: run {run_id!r} not found under {runs_dir}", err=True)
+        raise typer.Exit(code=1)
+    store = _open_store_or_exit(db)
+    run_row = store.get_run(run_id)
+    if run_row is None:
+        store.close()
+        typer.echo(f"error: run {run_id!r} not found in {db}", err=True)
+        raise typer.Exit(code=1)
+    product_config = _load_product_or_exit(str(run_row["product"]))
+
+    try:
+        final_state = finalize_run(
+            store=store,
+            run_dir=run_dir,
+            schemas_dir=SCHEMAS_DIR,
+            product=product_config,
+            run_id=run_id,
+            now=datetime.now(UTC),
+        )
+    except FinalizeError as exc:
+        store.close()
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    store.close()
+
+    verdict = final_state.get("verdict") or "FAIL"
+    typer.echo(f"run_id={run_id} verdict={verdict}")
+    typer.echo(f"report: {run_dir / 'outputs' / 'report.md'}")
+    raise typer.Exit(code=_VERDICT_EXIT_CODE.get(verdict, 1))
 
 
 @inspect_app.command("evidence")
