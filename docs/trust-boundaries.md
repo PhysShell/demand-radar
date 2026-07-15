@@ -31,8 +31,16 @@ Zone 3: deterministic judge (deterministic_judge, render_report, verify_run)
 
 ## What "read-only" means concretely here
 
-The analyst and critic are never given a filesystem-read tool at all
-(`--tools ""` for Claude; no MCP servers, no shell). Evidence text is not
+The analyst and critic are never given a filesystem-read tool at all. As of
+the `O7InvokeRunner` migration (`docs/o7-invoke.md`), the actual closed-world
+flags (`--tools ""`/`--strict-mcp-config` for Claude, `--sandbox read-only`
+for Codex) are enforced by **007's `o7 invoke`**, not by code in this
+repository — this codebase only shells out to `o7 invoke` and translates its
+`meta.json` into `AgentResult`. The `read-only-data` capability-profile label
+is still this codebase's vocabulary (`agents/base.py::READ_ONLY_DATA_PROFILE`);
+what it maps to is now 007's responsibility to enforce, and 007 refuses to
+run at all on an unrecognized profile name rather than silently narrowing or
+widening it (007's own `docs/security-layers.md`). Evidence text is not
 something the model goes and reads from a path — it is embedded directly
 into the prompt string by our own code
 (`agents/prompts/*.py`), inside a labeled fence:
@@ -64,60 +72,69 @@ regardless of whether it "obeys" the bait text or not:
 - It has no shell, so "run this command" in evidence text has nowhere to
   go.
 - It has no network tool of its own (Claude: none, structurally; Codex:
-  no shell tool via `-c features.shell_tool=false`, and no opt-in
-  `web_search` config passed — see the residual risk below for the one
-  gap this doesn't close).
+  no `web_search` opt-in — see the residual risk below for the one gap
+  this doesn't close). Enforced by 007's `invoke.rs`, not this repo.
 
 ## Auth storage
 
-Neither runner reads, copies, or logs Claude's or Codex's credential
-storage. Both shell out to the CLI the user already authenticated
-interactively (`claude`, `codex`) and rely on whatever the CLI's own login
-state already is. No `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`CODEX_API_KEY`
-is read by this codebase; `agents/codex_cli.py::_clean_env` actively
-**strips** `OPENAI_API_KEY`/`CODEX_API_KEY` from the subprocess environment
-before every call, so a key present in the parent environment for an
-unrelated reason can never silently substitute for the ChatGPT-subscription
-login this is meant to exercise.
+Neither this codebase nor `O7InvokeRunner` reads, copies, or logs Claude's
+or Codex's credential storage — `O7InvokeRunner` shells out to `o7 invoke`
+(007), which itself shells out to the CLI the user already authenticated
+interactively (`claude`, `codex`), relying on whatever the CLI's own login
+state already is. No `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`CODEX_API_KEY`/
+`CLAUDE_API_KEY` is read by either codebase; 007's
+`invoke.rs::strip_provider_api_keys` actively **strips** all four from the
+subprocess environment before every call (both engines, not just Codex —
+see `007/docs/decisions.log.md` for why this was added rather than assumed
+from `judge.rs`, which does not strip them), so a key present in the parent
+environment for an unrelated reason can never silently substitute for the
+subscription login this is meant to exercise.
 
 ## Filesystem
 
-Zone 2 processes write nothing themselves; `run_dir` is created and
-populated entirely by our own code (`agents/base.py::persist_call_artifacts`,
-the runners' own `stdout.jsonl`/`stderr.log`/`result.json` writes, which are
-paths **we** pass in and open, not paths the model chooses). `--tools ""`
-means Claude has no write tool at all; Codex's `-s read-only` denies writes
-at the sandbox level as a second layer.
+Zone 2 processes write nothing themselves. `O7InvokeRunner` creates and
+populates its own `run_dir` (`prompt.txt`, `input-manifest.json` if any);
+007's `o7 invoke` separately creates and populates its own `--out` directory
+(`stdout.raw`, `stderr.log`, `result.json`, `meta.json`) — paths **we** (or
+007, on our behalf) pass in and open, never paths the model chooses.
+`--tools ""` means Claude has no write tool at all; Codex's
+`--sandbox read-only` denies writes at the sandbox level as a second layer
+— both enforced inside 007, not here.
 
 ## Network
 
 CLI subprocess calls themselves need network to reach Anthropic's/OpenAI's
 own API (that is the point — subscription-backed inference). Beyond that:
-Claude has no tool that could reach any other host. Codex's `-s read-only`
-sandbox does **not** disable network (inherited residual risk from 007's
-own `judge/README.md`: "codex has no one-flag equivalent" to Claude's
-`--tools ""`) — this is why the analyst-facing extraction/critique work
-should prefer the Claude runner when a choice exists, and it is called out
+Claude has no tool that could reach any other host. Codex's
+`--sandbox read-only` does **not** disable network (inherited residual risk,
+documented identically in both repos: 007's `judge.rs`/`docs/security-layers.md`
+and this doc) — this is why the analyst-facing extraction/critique work
+should prefer the Claude engine when a choice exists, and it is called out
 explicitly rather than glossed over. No `web_search` config is enabled for
 Codex, so no live web tool exists either way in this MVP's actual
 invocations.
 
 ## Subprocess
 
-Prompts are passed via **stdin**, not argv (`subprocess.run(..., input=prompt)`),
-matching 007's own documented rationale (`007/docs/security-layers.md`):
-argv is world-readable via `/proc/*/cmdline` and shell history, and has a
-size limit an evidence-laden prompt could hit. Both runners run with an
-explicit `timeout`; Python's `subprocess.run(..., timeout=...)` kills the
-process on expiry as part of raising `TimeoutExpired`, which both runners
-catch and turn into `BLOCKED_TIMEOUT`.
+Prompts are passed via **stdin**, not argv, both at this repo's boundary
+(`O7InvokeRunner` writes `prompt.txt` and hands 007 its path, never the
+text as an argv token) and inside 007 itself (`invoke.rs::spawn_with_timeout`
+writes the prompt to the child's stdin) — matching 007's own documented
+rationale (`007/docs/security-layers.md`): argv is world-readable via
+`/proc/*/cmdline` and shell history, and has a size limit an evidence-laden
+prompt could hit. `o7 invoke` runs with an explicit `--timeout-secs`,
+polling and killing the child on expiry (`invoke.rs::spawn_with_timeout`);
+`O7InvokeRunner` itself also passes a `timeout` to the `o7` subprocess call
+one layer up, so a hang in `o7` itself (not just the backend CLI) is still
+bounded. Either layer's timeout surfaces as `BLOCKED_TIMEOUT`.
 
 ## Logs
 
-`stdout.jsonl`/`stderr.log` capture exactly what the CLI printed — no
-environment dump, no credential material (there is none to capture, since
-neither runner ever reads or forwards a credential file). `meta.json`
-(the serialized `AgentResult`) records `command_version`, `model`,
+`stdout.raw`/`stderr.log` (written by 007) capture exactly what the backend
+CLI printed — no environment dump, no credential material (there is none to
+capture, since nothing in either codebase ever reads or forwards a
+credential file). `meta.json` (007's own record, translated into this
+repo's `AgentResult` by `O7InvokeRunner`) records `command_version`, `model`,
 timestamps, exit code, and hashes — never the prompt's or the environment's
 full content beyond the `prompt.txt` written alongside it (which is,
 itself, evidence text plus our own fixed template — never a secret).
@@ -133,30 +150,35 @@ it is not silently dropped or ignored.
 ## Accepted residual risks
 
 - **Codex flags are unverified against a real install.** `codex` is not
-  installed in the environment this MVP was built in, so
-  `agents/codex_cli.py`'s flags (`-a never exec - --json --output-schema
-  <file> -s read-only -c features.shell_tool=false --skip-git-repo-check`)
-  were checked against public documentation and cross-referenced with
-  007's own `judge/README.md`, not against `codex --help` directly, as the
-  task instructs when possible. Re-verify before first real use — see
-  `docs/decisions.log.md`. `demand-radar smoke-agents` will surface
-  `BLOCKED_NOT_INSTALLED` honestly rather than assume success.
-- **Codex `-s read-only` does not close network egress** (see above) —
-  inherited, documented, not solved here.
-- **No syscall-level sandbox (Landlock/seccomp/microVM) wraps either
-  runner's subprocess.** Considered and **not adopted for this MVP**: the
-  sibling `sandboy` (Own.NET, Landlock+seccomp wrap-the-child) exists and
-  wraps arbitrary subprocess commands, so `sandboy run --policy ... --
-  claude ...` could wrap these calls the same way a `.007/gate.toml` step
-  would — but sandboy itself is unverified-built in this environment (its
-  own README notes it was "authored in a network-restricted sandbox," not
-  compiled), and the closed-world CLI flags here already remove the tool
-  surface an OS sandbox would otherwise need to contain. Adding an unproven
-  dependency to defend against a threat with no observed instance (an
-  agent escaping its own `--tools ""` restriction) is exactly the
-  "building for a need that hasn't appeared" pattern 007's own
-  `docs/workflow-scripting.md` warns against. Revisit if a future Demand
-  Radar agent zone needs actual shell/filesystem tool access.
+  installed in the environment either this MVP or 007's `invoke.rs` was
+  built in, so 007's codex flags (`-a never exec - --json --sandbox
+  read-only --skip-git-repo-check --ephemeral --output-last-message <file>`
+  — matched from `judge.rs`'s own already-more-verified pattern, see
+  `007/docs/decisions.log.md`) are checked against public documentation and
+  `judge.rs`'s existing behavior, not against `codex --help` directly.
+  Re-verify before first real use. `demand-radar smoke-agents` will surface
+  `BLOCKED_NOT_INSTALLED` honestly rather than assume success — confirmed
+  live in this environment (`claude: PASS`, `codex: BLOCKED_NOT_INSTALLED`).
+- **Codex `--sandbox read-only` does not close network egress** (see
+  above) — inherited, documented in both repos, not solved here.
+- **This project no longer owns the closed-world enforcement code at
+  all — it owns the translation layer.** `O7InvokeRunner` trusts 007's
+  `meta.json` as the source of truth for `status`/`schema_valid`/
+  `error_kind`; it does not re-derive these from `o7`'s own stdout/exit
+  code. This is a deliberate trust boundary, not an oversight: re-deriving
+  the same classification logic in two languages is exactly the kind of
+  drift the cross-repo conformance gate (`docs/o7-invoke.md`) exists to
+  catch if it ever happens, rather than silently diverging. If 007's own
+  classification has a bug, this repo inherits it — which is the intended
+  trade for not maintaining the closed-world flags twice.
+- **No syscall-level sandbox (Landlock/seccomp/microVM) wraps `o7 invoke`'s
+  subprocess.** Considered and **not adopted**, for the same reason 007's
+  own `docs/security-layers.md` gives: the sibling `sandboy` (Own.NET) is
+  unverified-built in this environment, and the closed-world CLI flags
+  already remove the tool surface an OS sandbox would otherwise need to
+  contain. Revisit if a future zone needs actual shell/filesystem tool
+  access. This is now entirely 007's decision to make, not this repo's —
+  tracked in `007/docs/security-layers.md`, not duplicated here.
 - **No cryptographic chain-of-custody.** `verification.json`'s hashes are
   plain `sha256` of the named artifact — a reproducibility record, proving
   "this file has this content," not a signed or tamper-evident chain. Never

@@ -64,14 +64,10 @@ def _load_product_or_exit(product: str) -> ProductConfig:
 def get_runner(name: str) -> AgentRunner:
     if name == "fake":
         return FakeRunner(provider_name="fake")
-    if name == "claude":
-        from demand_radar.agents.claude_cli import ClaudeCodeRunner
+    if name in ("claude", "codex"):
+        from demand_radar.agents.o7_invoke import O7InvokeRunner
 
-        return ClaudeCodeRunner()
-    if name == "codex":
-        from demand_radar.agents.codex_cli import CodexCliRunner
-
-        return CodexCliRunner()
+        return O7InvokeRunner(engine=name)
     typer.echo(f"error: unknown runner {name!r}; expected fake, claude, or codex", err=True)
     raise typer.Exit(code=1)
 

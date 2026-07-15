@@ -250,3 +250,47 @@ installed here). Schema files themselves keep their `$schema` key
 (needed for editor/tooling validation and for `schemas/*.json`'s own
 Draft 2020-12 validity check in `scripts/check.sh`); the strip happens only
 on the wire to each CLI's schema flag, not in the files on disk.
+
+## 2026-07-15 — Migrated to `o7 invoke`; `claude_cli.py`/`codex_cli.py` deleted
+
+Follow-up scope, explicitly authorized to also touch 007 (previously
+off-limits): consolidate the closed-world Claude/Codex CLI-invocation logic
+that existed **twice** — once here (`claude_cli.py`/`codex_cli.py`,
+partially unverified for Codex) and once, more carefully, in 007's
+`judge.rs` (`--output-last-message`, proven) — into one place. 007 gained a
+narrow new primitive, `o7 invoke` (`007/src/invoke.rs`), generalizing
+`judge.rs`'s closed-world call pattern to an arbitrary caller-supplied
+prompt + schema. `agents/o7_invoke.py::O7InvokeRunner` is now this repo's
+only non-fake `AgentRunner`; `claude_cli.py`/`codex_cli.py` are deleted, not
+kept as dead code. Full record, what differs from the original
+`docs/o7-bridge-proposal.md` sketch, and live verification results:
+`docs/o7-invoke.md`.
+
+Two real things fell out of doing this migration carefully rather than
+quickly:
+1. **`claude --json-schema` rejects `$schema`** (the bug logged above) —
+   confirmed to also affect 007's own new `invoke.rs` if left unfixed;
+   fixed once, in Rust, so every caller of `o7 invoke` (not just this repo)
+   gets it. This repo's own `strip_dollar_schema` copy (`agents/base.py`)
+   became dead code the moment `claude_cli.py` was deleted, so it was
+   deleted in the same pass, not left for a future cleanup to rediscover.
+2. **Provider API keys were never stripped for Codex-via-`judge.rs`, and
+   never stripped for Claude at all, anywhere.** This repo's own
+   `codex_cli.py::_clean_env` stripped `OPENAI_API_KEY`/`CODEX_API_KEY`
+   for Codex only; 007's `judge.rs` strips neither, for either engine.
+   Writing the trust-boundary comparison for `docs/o7-invoke.md` surfaced
+   this gap directly (comparing "what does each side actually strip"
+   line by line) — fixed in `invoke.rs::strip_provider_api_keys`, applied
+   to both engines, since `o7 invoke` is meant to be the one shared
+   primitive both this repo and any future caller relies on.
+
+Verified, not assumed: cross-repo conformance gate
+(`scripts/o7_conformance_gate.py`) run for real in this environment —
+`claude` direct-`o7-invoke` vs `O7InvokeRunner`-wrapped calls agree on
+`status`/`schema_valid`/`error_kind`/structured output
+(`PASS`/`PASS`/`True`/`True`/matching `{"acknowledged": true}`); same for
+`codex` (`BLOCKED_NOT_INSTALLED`/`BLOCKED_NOT_INSTALLED` on both sides,
+matching `error_kind`). All 124 tests still pass (117 pre-migration + 7 new
+`test_o7_invoke_runner.py` tests, replacing the 7 deleted
+`test_cli_runner_schema_wire.py` tests that tested the now-deleted
+runners' own schema-stripping).

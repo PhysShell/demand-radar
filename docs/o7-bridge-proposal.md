@@ -1,11 +1,24 @@
 # `o7 invoke` — a future read-only agent primitive for 007
 
-Status: **proposal only, not implemented**. Demand Radar does not import,
-link against, or depend on 007 in any way; this note exists solely to
-record what a minimal future contract could look like, so that if 007 ever
-grows a subscription-backed read-only agent primitive, Demand Radar's own
-runner interface (`agents/base.py::AgentRunner`) is a plausible client of it
-without a rewrite. Nothing here is scheduled or committed.
+Status: **superseded — implemented.** This proposal shipped:
+`007/src/invoke.rs` implements `o7 invoke`, and Demand Radar's
+`agents/o7_invoke.py::O7InvokeRunner` is its client, replacing the
+`ClaudeCodeRunner`/`CodexCliRunner` this proposal originally imagined
+Demand Radar keeping. See [`docs/o7-invoke.md`](o7-invoke.md) for the actual
+implementation, what differs from this original sketch, and the cross-repo
+conformance gate. This file is kept as the historical record of the
+proposal, not edited to match what was actually built — read it as "here is
+what was proposed," not "here is what exists."
+
+---
+
+**Original status (superseded above): proposal only, not implemented.**
+Demand Radar does not import, link against, or depend on 007 in any way;
+this note exists solely to record what a minimal future contract could look
+like, so that if 007 ever grows a subscription-backed read-only agent
+primitive, Demand Radar's own runner interface (`agents/base.py::AgentRunner`)
+is a plausible client of it without a rewrite. Nothing here is scheduled or
+committed.
 
 ## Why this is a proposal, not code
 

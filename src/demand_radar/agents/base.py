@@ -53,23 +53,6 @@ def hash_input_paths(input_paths: Sequence[Path]) -> list[str]:
     return [sha256_file(p) for p in input_paths]
 
 
-def strip_dollar_schema(schema_text: str) -> str:
-    """Drop a top-level `$schema` meta-key before handing a schema to a CLI's
-    own schema-validating flag. Verified necessary for `claude --json-schema`
-    (v2.1.210): it rejects a schema carrying `$schema` with `Error:
-    --json-schema is not a valid JSON Schema: no schema with key or ref
-    "https://json-schema.org/draft/2020-12/schema"` -- `$id` is unaffected
-    (see docs/decisions.log.md). Applied to Codex's `--output-schema` file
-    too, since both runners read the same schema files/dicts, though that
-    side has not been verified against a real `codex` binary in this
-    environment.
-    """
-    schema = json.loads(schema_text)
-    if isinstance(schema, dict):
-        schema.pop("$schema", None)
-    return json.dumps(schema)
-
-
 def call_agent_with_retry(
     runner: AgentRunner,
     *,

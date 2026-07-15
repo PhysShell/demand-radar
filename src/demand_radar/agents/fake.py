@@ -29,7 +29,7 @@ class FakeScenario:
 
 
 class FakeRunner:
-    """Deterministic stand-in for ClaudeCodeRunner/CodexCliRunner.
+    """Deterministic stand-in for O7InvokeRunner.
 
     `scenarios` maps task_id -> FakeScenario for tests that need specific,
     per-call behavior (e.g. "the critic call for opp_007 times out"); any

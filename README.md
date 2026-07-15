@@ -22,11 +22,14 @@ public evidence
   It gives the model evidence items and requires every claim to cite one.
 - Not a social-listening SaaS. There is no hosting, no multi-tenant mode, no
   UI, no scraper. You bring your own JSONL/RSS exports.
-- Not a new agent platform, and not part of `007`. It is a standalone sibling
-  tool that happens to invoke the same `claude`/`codex` CLIs 007 does, over
-  local subscription auth — see [Subscription-backed runners](#subscription-backed-runners)
-  and [`docs/o7-bridge-proposal.md`](docs/o7-bridge-proposal.md) for the
-  (unimplemented) future contract with 007.
+- Not a new agent platform, and its own pipeline/scoring/storage code is not
+  part of `007`. It *does* now depend on 007 at runtime for the one thing
+  007 does better than a second copy would: `agents/o7_invoke.py`
+  shells out to `o7 invoke` for both `claude` and `codex`, rather than this
+  repo holding its own closed-world CLI-flag logic — see
+  [Subscription-backed runners](#subscription-backed-runners) and
+  [`docs/o7-invoke.md`](docs/o7-invoke.md) for the actual implementation and
+  the cross-repo conformance gate that keeps the two repos honest about it.
 - Not a market-size or success-probability estimator. The demand score is a
   ranking heuristic — see [`docs/scoring.md`](docs/scoring.md).
 - Not a validator. Nothing in this tool can mark an opportunity
@@ -45,8 +48,10 @@ uv run demand-radar report --run <run-id> --format markdown
 ```
 
 Swap `--analyst fake --critic fake` for `--analyst claude --critic codex` once
-`claude`/`codex` are installed and logged in with a subscription (see below).
-Offline tests and the fixture gate never use the real CLIs.
+`claude`/`codex` are installed and logged in with a subscription, **and** a
+built `o7` binary (sibling `007` repo, `cargo build`) is on `PATH` — see
+[Subscription-backed runners](#subscription-backed-runners). Offline tests
+and the fixture gate never use the real CLIs or require `o7` at all.
 
 The bare `fake` provider above has no knowledge of the fixture's content —
 it returns an empty object for every call, which correctly fails schema
@@ -82,13 +87,21 @@ schema validation runs against — is `EvidenceItem`, per
 ## Subscription-backed runners
 
 Claude Code and Codex CLI are invoked as **local, non-interactive,
-subscription-authenticated CLI adapters** — the same posture `007` uses for
-`o7 judge` (closed-world: no shell tool, no ambient MCP, strict JSON Schema
-output). This is *"subscription-backed CLI execution inspired by 007"*, not
-an integration with 007 — Demand Radar does not import or link against 007,
-and 007's binary is untouched by this project. No Anthropic or OpenAI API key
-is used or read; credential storage is never touched directly, only the
-already-authenticated `claude`/`codex` CLIs.
+subscription-authenticated CLI adapters**, via 007's `o7 invoke` primitive
+(`007/src/invoke.rs`) — the same closed-world posture `007` uses for
+`o7 judge` (no shell tool, no ambient MCP, schema-constrained output),
+generalized to an arbitrary prompt/schema instead of judge's own hardcoded
+verdict shape. This *is* a real runtime dependency on 007 (a built `o7`
+binary must be on `PATH`), not merely "inspired by" it — `agents/o7_invoke.py`
+shells out to `o7 invoke` and holds no closed-world flag knowledge of its
+own; that all lives in 007 now (`007/src/invoke.rs`, not Python). See
+[`docs/o7-invoke.md`](docs/o7-invoke.md) for what changed and why. No
+Anthropic or OpenAI API key is used or read by either repo; credential
+storage is never touched directly, only the already-authenticated
+`claude`/`codex` CLIs (007's `invoke.rs::strip_provider_api_keys` also
+actively strips any provider API key from the subprocess environment,
+so one present for an unrelated reason can't silently substitute for
+subscription auth).
 
 ## Trust warning
 

@@ -1,8 +1,9 @@
 """`demand-radar smoke-agents` — spec section 24. Not run in CI; exercises
-the real, already-authenticated `claude`/`codex` CLIs with one minimal
-schema-bound prompt each, no repo files, no network research (both runners
-are closed-world by construction -- see agents/claude_cli.py,
-agents/codex_cli.py). One provider's outcome never substitutes for another's.
+the real, already-authenticated `claude`/`codex` CLIs (via `o7 invoke` --
+see agents/o7_invoke.py and docs/o7-invoke.md) with one minimal schema-bound
+prompt each, no repo files, no network research (closed-world by
+construction, enforced by 007, not this project). One provider's outcome
+never substitutes for another's.
 """
 
 from __future__ import annotations
@@ -13,8 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from demand_radar.agents.base import READ_ONLY_DATA_PROFILE, persist_call_artifacts
-from demand_radar.agents.claude_cli import ClaudeCodeRunner
-from demand_radar.agents.codex_cli import CodexCliRunner
+from demand_radar.agents.o7_invoke import O7InvokeRunner
 
 SMOKE_SCHEMA = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -57,7 +57,10 @@ def run_smoke_agents(*, runs_dir: Path, schemas_dir: Path) -> dict[str, SmokeOut
     schema_path.write_text(json.dumps(SMOKE_SCHEMA, indent=2), encoding="utf-8")
 
     results: dict[str, SmokeOutcome] = {}
-    for provider_name, runner in (("claude", ClaudeCodeRunner()), ("codex", CodexCliRunner())):
+    for provider_name, runner in (
+        ("claude", O7InvokeRunner(engine="claude")),
+        ("codex", O7InvokeRunner(engine="codex")),
+    ):
         call_dir = run_dir / provider_name
         task_id = f"smoke:{provider_name}"
         result = runner.run(

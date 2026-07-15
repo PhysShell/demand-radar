@@ -194,21 +194,22 @@ the *final* `DemandState`, written once by the CLI after the run completes
 ## Runner interface
 
 `agents/base.py::AgentRunner` is a `Protocol` (exact spec section 13
-signature). Four implementations share it:
+signature). Two implementations share it:
 
 - `agents/fake.py::FakeRunner` — required for all tests (spec 13.3);
   scenarios keyed by `task_id` simulate success, timeout, auth failure,
   usage-limit, malformed JSON, and schema violation.
-- `agents/claude_cli.py::ClaudeCodeRunner` — shells out to the
-  already-authenticated `claude` CLI, closed-world (`--tools ""`,
-  `--strict-mcp-config`, empty `--setting-sources`, `--no-session-persistence`),
-  prompt via stdin.
-- `agents/codex_cli.py::CodexCliRunner` — shells out to `codex exec`,
-  `-s read-only` + `-c features.shell_tool=false`, `OPENAI_API_KEY`/
-  `CODEX_API_KEY` stripped from the subprocess environment. Flags
-  unverified against a real install (`codex` is not installed in the
-  environment this was built in) — see `docs/decisions.log.md` and
-  `docs/trust-boundaries.md`.
+- `agents/o7_invoke.py::O7InvokeRunner` — shells out to 007's `o7 invoke`
+  (`--engine claude|codex`), which itself shells out to the
+  already-authenticated `claude`/`codex` CLI, closed-world by construction
+  on 007's side (see `docs/o7-invoke.md` for the full migration record and
+  `007/src/invoke.rs` for the actual flags/env-stripping/timeout logic).
+  This runner's own job is narrow: build `o7 invoke`'s argv, then translate
+  its `meta.json` into this repo's `AgentResult` — it holds no closed-world
+  flag knowledge itself, and previously separate `ClaudeCodeRunner`/
+  `CodexCliRunner` implementations (with their own duplicated closed-world
+  flags, one per language) were removed once this consolidation was
+  cross-repo conformance-gated (`docs/decisions.log.md`).
 
 Every call goes through `agents/base.py::call_agent_with_retry`, which
 retries **only** on `BLOCKED_TIMEOUT` (spec 12.2: "malformed structured
