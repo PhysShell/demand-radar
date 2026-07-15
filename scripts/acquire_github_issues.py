@@ -28,13 +28,24 @@ Phase 2A).
 
 Determinism
 -----------
-- Per-query fetch: `sort=created&order=asc`, one page, so the same
-  underlying GitHub state always returns items in the same order.
+- Per-query fetch: `sort=created&order=desc`, one page, so the same
+  underlying GitHub state always returns items in the same order (newest
+  first per query).
 - Dedup key (canonical identity): `source_id` (`github_issue:owner/repo#N`)
-  -- an issue matched by more than one query collapses to one record,
-  logged as a duplicate, not two.
-- Final output order: sorted by `source_id` -- alphabetic, trivially
-  auditable, independent of any API pagination/tie-break quirk.
+  -- an issue matched by more than one query collapses to one record, owned
+  by whichever query is *first in the request file's query list* (not by
+  alphabetic accident); logged as a duplicate, never kept twice.
+- Selection when eligible records exceed max_records: deterministic
+  round-robin across queries, in the request file's own query order, each
+  query contributing its own created-desc order -- see select_round_robin().
+  This replaces an earlier version of this script that sorted all eligible
+  records by source_id and then capped, which silently favored repo owners
+  whose name sorts early in ASCII -- a real reported defect (a "tournament
+  of repo owners for an early ASCII slot," not a market sample), not a
+  hypothetical one. See docs/trials/github-live-issues-trial.md.
+- Final output order: sorted by `source_id` -- but only *after* selection,
+  purely so the serialized file is easy to diff/review; this sort has no
+  influence on *which* records get selected.
 - Re-running this workflow against unchanged upstream GitHub state
   reproduces the same evidence.jsonl content; re-running it later reflects
   whatever changed on GitHub in the meantime, which is real data changing,
@@ -106,6 +117,18 @@ BOT_LOGIN_EXACT_LOWER = {
     "allcontributors",
     "codecov-commenter",
     "github-actions",
+    # Migration/import automation accounts confirmed present in the live
+    # trial dataset (docs/trials/github-live-issues-trial.md) that github's
+    # API does not reliably mark user.type=="Bot" (legacy/project-specific
+    # automation, not registered GitHub Apps) -- curated by login as a
+    # second, independent signal alongside the user.type=="Bot" check in
+    # classify_item(). Not an attempt to extract "real" authorship from
+    # free-text issue content -- these are excluded as non-independent
+    # authors purely by account identity.
+    "firebird-automations",
+    "googlecodeexporter",
+    "ironpythonbot",
+    "orchardbot",
 }
 
 PULL_REQUEST = "pull_request"
@@ -156,7 +179,7 @@ def fetch_search_page(
         {
             "q": query,
             "sort": "created",
-            "order": "asc",
+            "order": "desc",
             "per_page": per_page,
         }
     )
@@ -208,7 +231,9 @@ def classify_item(item: dict[str, Any]) -> str | None:
     if not login or not created_at:
         return MISSING_AUTHOR_OR_CREATED_AT
     login_lower = str(login).lower()
-    if login_lower in BOT_LOGIN_EXACT_LOWER or login_lower.endswith("[bot]"):
+    is_named_bot_login = login_lower in BOT_LOGIN_EXACT_LOWER or login_lower.endswith("[bot]")
+    is_flagged_bot_type = user.get("type") == "Bot"
+    if is_named_bot_login or is_flagged_bot_type:
         return BOT_AUTHOR
     title = str(item.get("title") or "").strip()
     body = str(item.get("body") or "").strip()
@@ -242,20 +267,78 @@ def build_raw_record(
     return record, truncated
 
 
-def deduplicate(records: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
-    """Canonical identity = source_id. First-seen wins; input order is
-    itself deterministic (query-list order, then per-query created-ascending
-    API order), so this is deterministic given the same upstream data.
+def deduplicate_by_query(
+    records_by_query: list[tuple[str, list[dict[str, Any]]]],
+) -> tuple[dict[str, list[dict[str, Any]]], int]:
+    """Canonical identity = source_id. `records_by_query` is an ORDERED list
+    of (query_id, records) pairs -- order matters: whichever query is first
+    in that list "owns" a source_id, and every later occurrence of the same
+    source_id (whether later in the same query's list or in a subsequent
+    query) is dropped as an exact duplicate. Each query's own internal
+    record order (created desc) is preserved in the returned per-query
+    lists, since select_round_robin() depends on it.
+
+    Kept separate from selection/capping on purpose: exact-identity dedup is
+    a content fact (the same GitHub issue was matched twice), not a volume
+    decision, so it must happen before any cap-related sampling, not after.
     """
-    seen: dict[str, dict[str, Any]] = {}
+    seen: set[str] = set()
     duplicate_count = 0
-    for record in records:
-        key = record["source_id"]
-        if key in seen:
-            duplicate_count += 1
-            continue
-        seen[key] = record
-    return list(seen.values()), duplicate_count
+    result: dict[str, list[dict[str, Any]]] = {}
+    for query_id, records in records_by_query:
+        kept: list[dict[str, Any]] = []
+        for record in records:
+            source_id = record["source_id"]
+            if source_id in seen:
+                duplicate_count += 1
+                continue
+            seen.add(source_id)
+            kept.append(record)
+        result[query_id] = kept
+    return result, duplicate_count
+
+
+def select_round_robin(
+    query_order: list[str],
+    eligible_by_query: dict[str, list[dict[str, Any]]],
+    max_records: int,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Deterministic, fair selection up to max_records: one record per query
+    per round, visiting queries in `query_order` (the request file's own
+    order), continuing in rounds until either max_records is reached or
+    every query is exhausted. Each query's own internal order (created
+    desc) is preserved -- this changes only *which* records compete for a
+    cap slot, never the within-query preference.
+
+    This is the fix for a real reported defect: capping a list that had
+    already been sorted by source_id (alphabetic by owner/repo) silently
+    favored repo owners whose name sorts early in ASCII -- "a tournament of
+    repo owners for an early ASCII slot," not a market sample. Round-robin
+    selection removes that bias; the caller still sorts the *selected* set
+    by source_id afterwards, but only for stable serialization.
+
+    Returns (selected records in round-robin draw order -- caller re-sorts
+    for output --, count selected per query_id, covering every key in
+    query_order even when 0).
+    """
+    next_index = {key: 0 for key in query_order}
+    accepted_per_query = {key: 0 for key in query_order}
+    selected: list[dict[str, Any]] = []
+    made_progress = True
+    while made_progress and len(selected) < max_records:
+        made_progress = False
+        for key in query_order:
+            if len(selected) >= max_records:
+                break
+            records = eligible_by_query.get(key, [])
+            idx = next_index[key]
+            if idx >= len(records):
+                continue
+            selected.append(records[idx])
+            accepted_per_query[key] += 1
+            next_index[key] = idx + 1
+            made_progress = True
+    return selected, accepted_per_query
 
 
 def run_acquisition(
@@ -265,14 +348,25 @@ def run_acquisition(
     fetch: Any = fetch_search_page_with_retry,
     sleep: Any = time.sleep,
 ) -> dict[str, Any]:
-    """Orchestrates fetch -> classify -> build -> dedup -> cap -> validate.
+    """Orchestrates, in this order: fetch -> classify/filter (including
+    schema validation) -> exact source_id dedup across queries ->
+    deterministic round-robin selection up to max_records -> final sort by
+    source_id for stable serialization only.
+
     `fetch`/`sleep` are injectable so this whole function is testable
     offline with a canned fetch stub and no real delay.
+
+    Selection must happen BEFORE the alphabetic sort, not after: sorting the
+    full eligible set and then slicing to max_records silently favors
+    source_ids that sort early (i.e. whichever repo owner's name starts with
+    an early letter) -- a real reported sampling defect, not a neutral
+    tie-break. See select_round_robin()'s docstring.
     """
     fetched_per_query: dict[str, int] = {}
     exclusion_counts: dict[str, int] = {}
     truncated_count = 0
-    accepted: list[dict[str, Any]] = []
+    schema_failures = 0
+    records_by_query: list[tuple[str, list[dict[str, Any]]]] = []
 
     for i, spec in enumerate(config.queries):
         query_id = f"{config.query_id_prefix}:{spec.id}"
@@ -283,9 +377,11 @@ def run_acquisition(
         except (urllib.error.URLError, urllib.error.HTTPError) as exc:
             print(f"query {spec.id!r} failed, skipping: {exc}", file=sys.stderr)
             fetched_per_query[spec.id] = 0
+            records_by_query.append((spec.id, []))
             continue
         items = payload.get("items", [])
         fetched_per_query[spec.id] = len(items)
+        query_records: list[dict[str, Any]] = []
         for item in items:
             reason = classify_item(item)
             if reason is not None:
@@ -294,40 +390,52 @@ def run_acquisition(
             record, was_truncated = build_raw_record(
                 item, query_id=query_id, body_truncate_chars=config.body_truncate_chars
             )
+            try:
+                RawEvidenceRecord.model_validate(record)
+            except (
+                Exception
+            ) as exc:  # any validation failure excludes the record, never crashes the run
+                schema_failures += 1
+                print(
+                    f"record {record.get('source_id')} failed schema validation: {exc}",
+                    file=sys.stderr,
+                )
+                continue
             if was_truncated:
                 truncated_count += 1
-            accepted.append(record)
+            query_records.append(record)
+        records_by_query.append((spec.id, query_records))
 
-    deduped, duplicate_count = deduplicate(accepted)
-    deduped.sort(key=lambda r: str(r["source_id"]))  # final order: alphabetic by canonical identity
-
-    over_cap_count = max(0, len(deduped) - config.max_records)
-    capped = deduped[: config.max_records]
-
-    validated: list[dict[str, Any]] = []
-    schema_failures = 0
-    for record in capped:
-        try:
-            RawEvidenceRecord.model_validate(record)
-        except (
-            Exception
-        ) as exc:  # any validation failure excludes the record, never crashes the run
-            schema_failures += 1
-            print(
-                f"record {record.get('source_id')} failed schema validation: {exc}", file=sys.stderr
-            )
-            continue
-        validated.append(record)
     if schema_failures:
         exclusion_counts[SCHEMA_VALIDATION_FAILED] = schema_failures
 
+    eligible_by_query, duplicate_count = deduplicate_by_query(records_by_query)
+    eligible_per_query = {key: len(records) for key, records in eligible_by_query.items()}
+    eligible_total = sum(eligible_per_query.values())
+
+    query_order = [spec.id for spec in config.queries]
+    selected, accepted_per_query = select_round_robin(
+        query_order, eligible_by_query, config.max_records
+    )
+    excluded_by_cap_per_query = {
+        key: eligible_per_query[key] - accepted_per_query[key] for key in query_order
+    }
+    over_cap_count = eligible_total - len(selected)
+
+    selected.sort(key=lambda r: str(r["source_id"]))  # for serialization only -- selection is done
+
     return {
-        "validated": validated,
+        "validated": selected,
         "fetched_per_query": fetched_per_query,
         "exclusion_counts": exclusion_counts,
         "duplicate_count": duplicate_count,
         "over_cap_count": over_cap_count,
         "truncated_count": truncated_count,
+        "selection_strategy": "round_robin_by_query_order_then_source_id_sort",
+        "eligible_total": eligible_total,
+        "eligible_per_query": eligible_per_query,
+        "accepted_per_query": accepted_per_query,
+        "excluded_by_cap_per_query": excluded_by_cap_per_query,
     }
 
 
@@ -355,6 +463,11 @@ def write_outputs(result: dict[str, Any], config: AcquisitionConfig) -> None:
         "excluded_counts": result["exclusion_counts"],
         "excluded_total": sum(result["exclusion_counts"].values()),
         "duplicate_count": result["duplicate_count"],
+        "selection_strategy": result["selection_strategy"],
+        "eligible_total_before_cap": result["eligible_total"],
+        "eligible_per_query_before_cap": result["eligible_per_query"],
+        "accepted_per_query": result["accepted_per_query"],
+        "excluded_by_cap_per_query": result["excluded_by_cap_per_query"],
         "over_max_records_cap_count": result["over_cap_count"],
         "truncated_body_count": result["truncated_count"],
         "accepted_count": len(validated),
@@ -380,7 +493,10 @@ def write_outputs(result: dict[str, Any], config: AcquisitionConfig) -> None:
         "## Queries",
         "",
         *[
-            f"- `{s.id}`: `{s.q}` — fetched {result['fetched_per_query'].get(s.id, 0)}"
+            f"- `{s.id}`: `{s.q}` — fetched {result['fetched_per_query'].get(s.id, 0)}, "
+            f"eligible {result['eligible_per_query'].get(s.id, 0)}, "
+            f"selected {result['accepted_per_query'].get(s.id, 0)}, "
+            f"excluded by cap {result['excluded_by_cap_per_query'].get(s.id, 0)}"
             for s in config.queries
         ],
         "",
@@ -389,6 +505,8 @@ def write_outputs(result: dict[str, Any], config: AcquisitionConfig) -> None:
         f"- fetched total: {fetched_total}",
         f"- excluded total: {manifest['excluded_total']} ({result['exclusion_counts']})",
         f"- duplicates (same issue, multiple queries): {result['duplicate_count']}",
+        f"- eligible before cap: {result['eligible_total']}",
+        f"- selection strategy: `{result['selection_strategy']}`",
         f"- over max_records cap ({config.max_records}): {result['over_cap_count']}",
         f"- truncated bodies (> {config.body_truncate_chars} chars): {result['truncated_count']}",
         f"- **accepted (in evidence.jsonl): {len(validated)}**",

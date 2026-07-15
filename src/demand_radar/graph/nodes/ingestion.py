@@ -66,7 +66,9 @@ def deduplicate(state: DemandState, config: dict[str, Any]) -> dict[str, Any]:
     items: list[EvidenceItem] = [it for it in maybe_items if it is not None]
 
     links = deduplicate_evidence(
-        items, similarity_threshold=ctx.product.deduplication.similarity_threshold
+        items,
+        similarity_threshold=ctx.product.deduplication.similarity_threshold,
+        cross_repo_similarity_threshold=ctx.product.deduplication.cross_repo_similarity_threshold,
     )
     for link in links:
         ctx.store.upsert_duplicate_link(link)

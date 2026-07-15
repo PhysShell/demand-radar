@@ -72,9 +72,21 @@ class DeduplicationConfig(StrictModel):
     scores ~0.55-0.6, while distinct posts on the same topic top out ~0.2 (see
     tests/unit/test_similarity.py). Retune only against that measurement, not
     by feel.
+
+    cross_repo_similarity_threshold is a SEPARATE, stricter threshold applied
+    only to pairs from different repositories (github_issue source_ids;
+    unknown-repo pairs count as cross-repo). A live GitHub run found a real
+    false-positive collapse at 0.594 between two unrelated issues in
+    unrelated repos (EWSoftware/VSSpellChecker#30, NuGet/Home#3474) that both
+    happened to use generic GitHub issue-template language -- 0.5 was never
+    calibrated to reject that shape, only same-repo reposts. Same-repo pairs
+    keep similarity_threshold unchanged; do not raise similarity_threshold
+    itself to fix cross-repo false positives, it would blunt the same-repo
+    sensitivity this config's tests already depend on.
     """
 
     similarity_threshold: float = Field(default=0.5, ge=0, le=1)
+    cross_repo_similarity_threshold: float = Field(default=0.75, ge=0, le=1)
 
 
 class ProductConfig(StrictModel):

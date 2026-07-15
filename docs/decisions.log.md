@@ -346,3 +346,88 @@ compared 4 fields. Now passes a real, non-empty input fixture and checks
 existing `status`/`schema_valid`/`error_kind`/structured-output/prompt_hash
 checks. Re-run for real after all fixes: still `CONFORMANCE GATE: PASS`
 for both engines.
+
+## 2026-07-15 — Correction: alphabetic sampling bias, incomplete bot filter, false cross-repo dedup in the GitHub acquisition bridge
+
+External review of `docs/trials/github-live-issues-trial.md` (the Phase 2B
+live trial, workflow run `29430642497`, commit `20bec3e`) found three real
+defects in `scripts/acquire_github_issues.py` and the production dedup
+config, plus a causal misstatement in the report itself. All four are fixed
+here; `007`, `o7 invoke`, and the Codex policy are untouched, and the query
+pack / source families are unchanged, per the correction's own scope.
+
+1. **Deterministic sampling bug — alphabetic, not fair.** `run_acquisition()`
+   sorted all eligible records by `source_id` (alphabetic by `owner/repo`)
+   *before* slicing to `max_records` — a tournament of repo owners for an
+   early ASCII slot, not a market sample: whichever queries happened to
+   surface early-alphabet owner names would crowd out every other query's
+   results once the eligible set exceeded the cap. Fixed by reordering to
+   fetch → classify/filter (including schema validation) → exact `source_id`
+   dedup across queries (`deduplicate_by_query`; first-seen query, in the
+   request file's own order, owns a duplicate) → deterministic round-robin
+   selection across queries up to `max_records` (`select_round_robin`, new)
+   → only then sort the *selected* set by `source_id`, purely for
+   serialization. New manifest fields recording the corrected mechanism:
+   `selection_strategy`, `eligible_total_before_cap`,
+   `eligible_per_query_before_cap`, `accepted_per_query`,
+   `excluded_by_cap_per_query`. New regression coverage
+   (`test_run_acquisition_selection_is_not_alphabetically_biased` plus unit
+   tests for `select_round_robin` itself) reproduces the exact shape of the
+   bug — a query whose repos sort last must still get a fair share — and
+   would fail against the old code.
+2. **Bot filter missed migration/import accounts.** `firebird-automations`,
+   `GoogleCodeExporter`, `ironpythonbot`, and `orchardbot` — real accounts
+   present in the live trial dataset — matched neither the `[bot]` suffix
+   convention nor the curated login list. Fixed by adding `user.type ==
+   "Bot"` as an independent signal (GitHub's own API field, alongside the
+   login list, not a replacement for it) and adding these 4 logins to the
+   curated set by name, with regression tests for exactly those 4. No
+   attempt is made to extract a "real" author from free-text issue body
+   content (e.g. migrated Jira/Google Code text naming the original
+   reporter) — out of scope, per instruction; these accounts are excluded as
+   non-independent authors by account identity only.
+3. **Confirmed false dedup collapse, fixed with a scoped threshold, not a
+   blind global raise.** `EWSoftware/VSSpellChecker#30` and `NuGet/Home#3474`
+   — two unrelated issues in unrelated repos, both auto-generated Visual
+   Studio environment dumps that happen to share enough boilerplate text —
+   scored 0.594 under the single `similarity_threshold=0.5`, above
+   threshold, and collapsed into one duplicate group. `ingest/deduplicate.py`
+   gained a separate `cross_repo_similarity_threshold` (0.75,
+   `products/own-audit.yaml`), applied only when a pair's derived repo keys
+   differ (or are unknown); same-repo pairs are untouched. Verified two
+   ways: (a) synthetic fixtures calibrated to the same 0.5-0.75 band
+   (`tests/unit/test_deduplicate.py`, 3 new tests, 10/10 passing); (b)
+   re-running `deduplicate_evidence()` offline against the trial's actual
+   100-record `evidence.jsonl` — old: 4 links/3 groups/96 independent, new:
+   3 links/2 groups/97 independent, exactly the one false pair removed and
+   nothing else changed. `similarity_threshold` itself (same-repo pairs) is
+   untouched — it was never the part that was wrong.
+4. **Report causal misstatement, corrected.** The live-trial report
+   attributed the run's `BLOCKED` verdict to the critic ("all 8
+   `critic_review` calls failed `FAIL_SCHEMA`") and claimed critic absence
+   was "the only reason this run doesn't carry a clean PASS." Both were
+   wrong, checked against the actual code rather than assumed:
+   `verification.py::overall_verdict()` returns `BLOCKED` on the analyst's
+   own status first, and this run's analyst hit a real `BLOCKED_TIMEOUT` on
+   one of its 96 live classify calls — that alone explains the BLOCKED
+   result, independent of the critic's separate `FAIL_INVALID_OUTPUT` status
+   (which alone would have produced `FAIL`, not `BLOCKED`). Separately,
+   `products/own-audit.yaml`'s `minimum_source_families: 2` gate is unmet by
+   this all-`github` dataset regardless of critic status — a second,
+   independent blocker to `experiment_ready` that a working critic alone
+   would not clear. `docs/trials/github-live-issues-trial.md` §10 now states
+   five facts separately (acquisition PASS; analyst result USEFUL BUT
+   BIASED; run verdict BLOCKED/cause analyst timeout; critic status
+   FAIL_INVALID_OUTPUT/cause FakeRunner; validation blocked by two
+   independent gates) instead of one collapsed causal story.
+
+Verification: full offline gate (`ruff check`, `ruff format --check`,
+`mypy --strict` on `src/`, full `pytest` suite) green; acquisition-script
+unit tests grew from 17 to 26 (new coverage for the 4 named bot accounts,
+`user.type=="Bot"`, and round-robin selection fairness/determinism); dedup
+regression tests grew from 7 to 10. One new acquisition workflow run
+triggered by this same push (a comment-only addition to
+`research/acquisition-request.yaml` — no change to product, queries, or
+limits) verifies the sampling and bot-filter fixes against real GitHub data,
+without re-running the 100-call Claude classification pipeline from the
+original trial. See the addendum below for that run's actual result.

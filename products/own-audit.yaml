@@ -46,6 +46,7 @@ thresholds:
 
 deduplication:
   similarity_threshold: 0.5
+  cross_repo_similarity_threshold: 0.75
 
 scoring_weights:
   frequency: 1.0

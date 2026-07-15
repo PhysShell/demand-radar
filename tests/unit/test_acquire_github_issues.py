@@ -73,6 +73,31 @@ def test_classify_item_excludes_bracket_bot_suffix() -> None:
     assert acq.classify_item(item) == acq.BOT_AUTHOR
 
 
+def test_classify_item_excludes_named_migration_automation_accounts() -> None:
+    """Regression for a real gap: these are migration/import accounts found
+    in the live trial dataset that slipped past the login-based filter.
+    Case-insensitive, since GitHub logins are case-preserving but not
+    case-sensitive for matching purposes here.
+    """
+    for login in ["firebird-automations", "GoogleCodeExporter", "ironpythonbot", "orchardbot"]:
+        item = _item(user={"login": login})
+        assert acq.classify_item(item) == acq.BOT_AUTHOR, f"{login} must be excluded as a bot"
+
+
+def test_classify_item_excludes_user_type_bot_regardless_of_login() -> None:
+    """user.type=="Bot" is an independent signal from the curated login
+    list -- catches registered GitHub Apps/bot accounts this script's
+    curated list doesn't happen to name.
+    """
+    item = _item(user={"login": "some-unlisted-automation", "type": "Bot"})
+    assert acq.classify_item(item) == acq.BOT_AUTHOR
+
+
+def test_classify_item_accepts_explicit_user_type() -> None:
+    item = _item(user={"login": "someuser", "type": "User"})
+    assert acq.classify_item(item) is None
+
+
 def test_classify_item_excludes_missing_author() -> None:
     item = _item(user=None)
     assert acq.classify_item(item) == acq.MISSING_AUTHOR_OR_CREATED_AT
@@ -122,23 +147,90 @@ def test_build_raw_record_truncates_long_body_and_reports_it() -> None:
     assert len(body_in_text) == 8000
 
 
-# --- deduplicate ---------------------------------------------------------------
+# --- deduplicate_by_query -------------------------------------------------------
 
 
-def test_deduplicate_collapses_same_source_id() -> None:
+def test_deduplicate_by_query_collapses_same_source_id_owned_by_first_query() -> None:
+    r1 = {"source_id": "github_issue:a/b#1", "query_id": "q1"}
+    r2 = {"source_id": "github_issue:a/b#1", "query_id": "q2"}  # same issue, later query
+    r3 = {"source_id": "github_issue:a/b#2", "query_id": "q1"}
+    eligible, dup_count = acq.deduplicate_by_query([("q1", [r1, r3]), ("q2", [r2])])
+    assert dup_count == 1
+    # q1 is first in the ordered input -> owns #1; q2's copy is dropped, not kept
+    assert eligible == {"q1": [r1, r3], "q2": []}
+
+
+def test_deduplicate_by_query_keeps_distinct_records() -> None:
+    records = [{"source_id": f"github_issue:a/b#{i}"} for i in range(5)]
+    eligible, dup_count = acq.deduplicate_by_query([("q1", records)])
+    assert eligible == {"q1": records}
+    assert dup_count == 0
+
+
+def test_deduplicate_by_query_dedupes_within_a_single_query_too() -> None:
     r1 = {"source_id": "github_issue:a/b#1"}
     r2 = {"source_id": "github_issue:a/b#1"}
-    r3 = {"source_id": "github_issue:a/b#2"}
-    deduped, dup_count = acq.deduplicate([r1, r2, r3])
-    assert len(deduped) == 2
+    eligible, dup_count = acq.deduplicate_by_query([("q1", [r1, r2])])
+    assert eligible == {"q1": [r1]}
     assert dup_count == 1
 
 
-def test_deduplicate_keeps_distinct_records() -> None:
-    records = [{"source_id": f"github_issue:a/b#{i}"} for i in range(5)]
-    deduped, dup_count = acq.deduplicate(records)
-    assert len(deduped) == 5
-    assert dup_count == 0
+# --- select_round_robin ----------------------------------------------------------
+
+
+def test_select_round_robin_is_fair_across_queries_not_alphabetic() -> None:
+    """Regression for the reported sampling defect: an earlier version of
+    this script sorted all eligible records by source_id (alphabetic by
+    owner/repo) and then capped, so repos whose name sorts early in ASCII
+    crowded out every other query's results -- "a tournament of repo owners
+    for an early ASCII slot," not a market sample. Here, the query whose
+    repo names sort LAST alphabetically must still get its fair round-robin
+    share.
+    """
+    mid = [{"source_id": f"github_issue:mmm-owner/repo#{i}"} for i in range(5)]
+    late = [{"source_id": f"github_issue:zzz-owner/repo#{i}"} for i in range(5)]
+    early = [{"source_id": f"github_issue:aaa-owner/repo#{i}"} for i in range(5)]
+
+    eligible_by_query = {"query-a": mid, "query-b": late, "query-c": early}
+    query_order = ["query-a", "query-b", "query-c"]  # request file's own order
+
+    selected, accepted_per_query = acq.select_round_robin(query_order, eligible_by_query, 6)
+
+    assert accepted_per_query == {"query-a": 2, "query-b": 2, "query-c": 2}
+    # two full rounds, drawing one from each query in query_order each round
+    assert [r["source_id"] for r in selected] == [
+        "github_issue:mmm-owner/repo#0",
+        "github_issue:zzz-owner/repo#0",
+        "github_issue:aaa-owner/repo#0",
+        "github_issue:mmm-owner/repo#1",
+        "github_issue:zzz-owner/repo#1",
+        "github_issue:aaa-owner/repo#1",
+    ]
+
+
+def test_select_round_robin_continues_past_exhausted_queries() -> None:
+    """A query with fewer eligible records than its fair share must not
+    block other queries from filling the remaining cap slots."""
+    small = [{"source_id": "github_issue:a/b#1"}]
+    big = [{"source_id": f"github_issue:c/d#{i}"} for i in range(5)]
+    selected, accepted_per_query = acq.select_round_robin(
+        ["small", "big"], {"small": small, "big": big}, max_records=4
+    )
+    assert accepted_per_query == {"small": 1, "big": 3}
+    assert len(selected) == 4
+
+
+def test_select_round_robin_covers_every_query_key_even_at_zero() -> None:
+    selected, accepted_per_query = acq.select_round_robin(["only"], {"only": []}, max_records=10)
+    assert selected == []
+    assert accepted_per_query == {"only": 0}
+
+
+def test_select_round_robin_under_capacity_takes_everything() -> None:
+    records = {"q": [{"source_id": f"github_issue:a/b#{i}"} for i in range(3)]}
+    selected, accepted_per_query = acq.select_round_robin(["q"], records, max_records=100)
+    assert len(selected) == 3
+    assert accepted_per_query == {"q": 3}
 
 
 # --- run_acquisition (end to end, fake fetch, no network) ---------------------
@@ -206,6 +298,52 @@ def test_run_acquisition_enforces_max_records_cap() -> None:
 
     assert len(result["validated"]) == 3
     assert result["over_cap_count"] == 7
+
+
+def test_run_acquisition_selection_is_not_alphabetically_biased() -> None:
+    """End-to-end regression for the reported sampling defect (see
+    select_round_robin's docstring): a query whose repos sort alphabetically
+    LAST must still get a fair share of the cap, not be crowded out by a
+    query whose repos happen to sort first.
+    """
+
+    def make_items(owner_prefix: str, count: int) -> list[dict]:
+        return [
+            _item(
+                number=i,
+                repository_url=f"https://api.github.com/repos/{owner_prefix}/repo",
+                html_url=f"https://github.com/{owner_prefix}/repo/issues/{i}",
+                user={"login": f"{owner_prefix}-user{i}"},
+            )
+            for i in range(count)
+        ]
+
+    pages = {
+        "query-early-alpha": {"items": make_items("aaa-owner", 5)},
+        "query-late-alpha": {"items": make_items("zzz-owner", 5)},
+    }
+
+    def fake_fetch(query: str, *, token: str, per_page: int) -> dict:
+        return pages[query]
+
+    config = _fake_config(
+        [
+            acq.QuerySpec(id="early", q="query-early-alpha"),
+            acq.QuerySpec(id="late", q="query-late-alpha"),
+        ],
+        max_records=4,
+    )
+    result = acq.run_acquisition(config, token="fake-token", fetch=fake_fetch, sleep=lambda _: None)
+
+    assert result["accepted_per_query"] == {"early": 2, "late": 2}
+    repos_selected = {
+        r["source_id"].split(":", 1)[1].rsplit("#", 1)[0] for r in result["validated"]
+    }
+    assert repos_selected == {"aaa-owner/repo", "zzz-owner/repo"}
+    assert result["selection_strategy"] == "round_robin_by_query_order_then_source_id_sort"
+    assert result["eligible_total"] == 10
+    assert result["eligible_per_query"] == {"early": 5, "late": 5}
+    assert result["excluded_by_cap_per_query"] == {"early": 3, "late": 3}
 
 
 def test_run_acquisition_survives_a_failing_query() -> None:

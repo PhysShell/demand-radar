@@ -1,6 +1,22 @@
 # GitHub live issues trial (Phase 2B)
 
-Status: complete · Verdict: **BLOCKED_BY_CRITIC_REQUIREMENT**
+Status: complete · **This trial does not reduce to one BLOCKED/PASS label.**
+An earlier version of this report collapsed several distinct facts into one
+causal story ("BLOCKED because of the critic"); that was wrong on the
+mechanism and is corrected below. §10 gives the full reasoning; the short
+form is:
+
+1. **Acquisition verdict: PASS.**
+2. **Analyst discovery result: USEFUL BUT BIASED.**
+3. **Production run verdict: BLOCKED** — immediate cause: the analyst's own
+   `BLOCKED_TIMEOUT`, **not** the critic.
+4. **Critic status: FAIL_INVALID_OUTPUT** — cause: `FakeRunner`'s `{}`
+   default fails schema; a separate fact from #3, and would only have
+   produced `FAIL` (not `BLOCKED`) on its own.
+5. **Validation status: not `experiment_ready`, for two independent
+   reasons** — a missing live critic, *and* `products/own-audit.yaml`'s
+   `minimum_source_families: 2` gate, unmet by an all-`github` dataset
+   regardless of critic status.
 
 This is a **real live trial**, not a replay: every record below came from
 GitHub's Search API through the Phase 2B acquisition bridge
@@ -9,10 +25,11 @@ GitHub's Search API through the Phase 2B acquisition bridge
 ingested through `demand-radar ingest`, and run through the real production
 pipeline (`demand-radar run --analyst claude --critic fake`) — the actual
 CLI, not a one-off experiment script. The acquisition and analyst stages
-succeeded outright and produced genuinely strong, evidence-linked output;
-the run-level verdict is honestly BLOCKED because the critic stage cannot
-complete without Codex, which stays forbidden. See §10 for why that is a
-different kind of "not done" than Phase 2A's `INSUFFICIENT_EXTERNAL_RECORDS`.
+succeeded outright and produced genuinely strong, evidence-linked output.
+See §10 for why the run's BLOCKED status is a different kind of "not done"
+than Phase 2A's `INSUFFICIENT_EXTERNAL_RECORDS` — and why it is *also* a
+different fact from the critic's own status, which an earlier version of
+this document conflated.
 
 ## 1. Exact queries
 
@@ -53,23 +70,55 @@ exact-source_id dedup above — this one compares text content):
 
 ```
 ingested:            100  (accepted=100 inserted=100 errors=0)
-independent after production dedup: 96
+independent after production dedup: 96   [as actually run, see correction below]
 duplicate groups found: 3  (4 evidence items folded in)
 ```
 
-The 3 production-dedup groups, by canonical identity and similarity score
-(all genuinely near-duplicate in content, not a false collapse):
+The 3 production-dedup groups, by canonical identity and similarity score:
 
 - `FirebirdSQL/NETProvider#195` ← `#196` (0.802), `#197` (0.776) — three
   bulk-migrated Jira subtasks about the same MemoryStream leak family (see §7).
 - `Sandip124/BatteryNotifier#58` ← `#68` (0.820) — two similar crash reports
   in the same small hobby project.
-- `EWSoftware/VSSpellChecker#30` ← `NuGet/Home#3474` (0.594) — the lowest
-  similarity score of the four; on inspection these are NOT actually the
-  same problem (a missing menu item vs. NuGet Package Manager freezing VS).
-  Flagged here as a borderline/likely-false dedup collapse, not silently
-  accepted — 0.594 is close to whatever threshold this run used, and this
-  is the case worth checking if the threshold is ever tuned.
+- `EWSoftware/VSSpellChecker#30` ← `NuGet/Home#3474` (0.594) — **a confirmed
+  false collapse**, not a borderline judgment call: these are unrelated
+  problems (a missing Tools-menu item vs. NuGet Package Manager freezing
+  Visual Studio). Both issue bodies happen to be auto-generated Visual
+  Studio environment dumps (a long list of installed VS components/
+  extensions), which share enough boilerplate text to inflate TF-IDF cosine
+  similarity to 0.594 — above this run's single `similarity_threshold=0.5`.
+
+**Correction — this is fixed, and independently verified against this exact
+real data, not just synthetic fixtures.** `ingest/deduplicate.py` now takes
+a separate, stricter `cross_repo_similarity_threshold` (0.75, configured in
+`products/own-audit.yaml`) applied only to pairs from different
+repositories; same-repo pairs are unaffected. Re-running
+`deduplicate_evidence()` directly (offline, no agent calls, no re-ingest)
+against this trial's actual 100-record `evidence.jsonl` confirms the fix
+is exact:
+
+```
+OLD (similarity_threshold=0.5 only):        4 links, 3 groups, 96 independent
+NEW (+ cross_repo_similarity_threshold=0.75): 3 links, 2 groups, 97 independent
+VSSpellChecker#30 <-> NuGet/Home#3474 linked: True (old) -> False (new)
+links removed by the fix: exactly 1 (this pair); links added: 0
+```
+
+The FirebirdSQL and BatteryNotifier groups (both genuinely same-repo,
+genuinely near-duplicate) are untouched — the fix is scoped precisely to
+the false cross-repo collapse it was written to fix, nothing more, nothing
+less. **What this correction does *not* do:** the §4-§8 cluster/candidate
+analysis below still reflects the *original* 96-independent-item run — it
+is not re-clustered or re-classified here, per explicit instruction not to
+re-spend the 100-call analyst budget on this correction. One concrete,
+known consequence: `NuGet/Home#3474` (a NuGet Package Manager freeze in a
+large WPF solution — squarely on-topic for the `large-wpf-application-
+performance` query that fetched it) was silently absorbed into an unrelated
+canonical record in the original run and never received its own `classify`
+call, so it does not appear anywhere in §4-§8. Giving it a fair, independent
+classification would take exactly one incremental analyst call against the
+now-97-item independent set — worth doing in a future pass, out of scope
+for this correction.
 
 ## 3. Repositories and authors
 
@@ -87,8 +136,19 @@ reporter's name is in the migrated text, not in GitHub's structured
 `user.login` field, which instead shows the import bot. Corrected count:
 **86 real human authors**, not 90 — still comfortably over the ≥20 minimum,
 but the 90 figure in the committed manifest should not be read as 90
-independent people. This is reported as a concrete, named bot-filter gap
-for the next iteration, not corrected after the fact in the committed data.
+independent people.
+
+**Correction — the acquisition script's bot filter now catches exactly
+these 4 accounts.** `classify_item()` gained a `user.type == "Bot"` check
+(an independent signal from GitHub's own API, alongside the existing login
+list) plus these 4 logins added to the curated exact-match set, with
+regression tests for all 4 by name. This dataset (run `29430642497`) is
+*not* re-fetched or re-classified to reflect the fix — the 90-reported /
+86-corrected figures above describe this trial's real, already-committed
+data as originally collected, unchanged. A fresh acquisition run confirming
+these 4 accounts are now excluded at the source is recorded separately (see
+the correction note referenced from `docs/decisions.log.md`), without
+re-spending this trial's 100-call analyst budget.
 
 Notable repos (of 77): `MahApps/MahApps.Metro`, `PrismLibrary/Prism`,
 `Krypton-Suite/Standard-Toolkit`, `aspnet/DependencyInjection`,
@@ -99,8 +159,13 @@ Notable repos (of 77): `MahApps/MahApps.Metro`, `PrismLibrary/Prism`,
 ## 4. Top problem clusters
 
 The production pipeline formed 8 clusters from the 96 independent evidence
-items (77 items never joined a reported cluster — see §5). All 8 reached
-`opportunity` candidate status; all 8 are capped at `investigate` (§10).
+items produced by that run (77 items never joined a reported cluster — see
+§5). All 8 reached `opportunity` candidate status; all 8 are capped at
+`investigate` (§10). As corrected in §2, this 96-item set includes the now-
+confirmed false `VSSpellChecker#30`/`NuGet/Home#3474` collapse; the
+corrected, dedup-only count is 97 independent items, but clustering was not
+re-run against that corrected set (§2 explains why and what specifically is
+missing as a result: `NuGet/Home#3474` itself).
 
 1. **Memory profilers fail to identify leak root cause/ownership** —
    11 unique authors, 12 evidence items, confidence 0.74 (the strongest
@@ -202,15 +267,21 @@ conflated with the commercial_intent score above.
 ## 7. Source bias
 
 - **Sort-order bias, a real design tradeoff surfaced by this trial, not
-  anticipated going in:** the acquisition script fetches `sort=created&
-  order=asc` (oldest matching issue first) for determinism. Combined with a
-  30-per-query fetch cap, this systematically favors OLD issues: most
-  accepted records date from 2014-2017; only the two Krypton-Suite reports
-  (2025, 2026) reflect anything resembling current/active pain. A
-  demand-signal acquisition run should probably sort by relevance or
-  `created desc` instead — determinism can still be had by re-sorting the
-  final output (as this script already does, by `source_id`) rather than by
-  controlling the *fetch* order. Worth changing before the next live run.
+  anticipated going in:** the acquisition script fetched `sort=created&
+  order=asc` (oldest matching issue first) for determinism *at the time of
+  this run*. Combined with a 30-per-query fetch cap, this systematically
+  favored OLD issues: most accepted records date from 2014-2017; only the
+  two Krypton-Suite reports (2025, 2026) reflect anything resembling
+  current/active pain. **Correction — fixed in the script, not re-run for
+  this dataset:** the acquisition script now fetches `order=desc` (newest
+  first per query); determinism no longer depends on fetch order at all —
+  it now comes from deterministic round-robin selection across queries plus
+  a final sort by `source_id` for serialization (§2's dedup fix and this
+  selection fix were bundled in the same correction; see the correction
+  note). This trial's own 100 records were fetched under the old `order=asc`
+  behavior and are not re-fetched; the old-issue skew described above still
+  accurately describes *this* dataset. A fresh run confirming `order=desc`
+  and fair cross-query selection is recorded separately.
 - **Migration/bulk-import contamination**: `FirebirdSQL/NETProvider`'s 7
   records and 3 `GoogleCodeExporter` records are historical Jira/Google Code
   migrations, not organic GitHub-native activity (§3).
@@ -246,7 +317,7 @@ on corroboration count and commercial signal, not fabrication.
 | Minimum | Required | Actual | Met? |
 |---|---:|---:|:-:|
 | Fetched issues | ≥50 | 247 | ✓ |
-| After dedupe | ≥30 | 96 (production dedup, on the 100 accepted) | ✓ |
+| After dedupe | ≥30 | 96 as-run / 97 with the dedup fix (§2) — either way | ✓ |
 | Repositories | ≥15 | 77 | ✓ |
 | Unique issue openers | ≥20 | 90 reported / 86 corrected (§3) | ✓ |
 | Synthetic records | 0 | 0 | ✓ |
@@ -258,35 +329,115 @@ against the query pack as committed.
 
 ## 10. Final verdict
 
-**BLOCKED_BY_CRITIC_REQUIREMENT.**
+**This trial does not reduce to one BLOCKED/PASS label.** An earlier
+version of this section collapsed several distinct facts into a single
+causal story — that the critic caused the run-level BLOCKED result, and
+that a working critic was the only thing standing between this dataset and
+a clean PASS. Both claims were wrong, verified against the actual code
+(`verification.py`, `scoring/judge.py`) rather than assumed, and are
+corrected below. Five facts, kept deliberately separate:
 
-`demand-radar run --product own-audit --analyst claude --critic fake` was
-run exactly as specified — the real production CLI, no experiment script,
-no substituted critic, Codex never invoked. Acquisition, ingest, classify
-(92/96 succeeded; 3 `FAIL_INVALID_OUTPUT` + 1 `BLOCKED_TIMEOUT`, real live-
-call failures reported honestly, not hidden), clustering, and opportunity
-generation all completed and produced 8 real, evidence-linked candidates,
-all correctly capped at `investigate` (0 reached `experiment_ready`,
-exactly as `judge.py`'s existing logic requires without a completed
-critic). The run-level verdict is `BLOCKED` because all 8 `critic_review`
-calls failed `FAIL_SCHEMA` — `FakeRunner`'s default output is `{}`, which
-cannot pass `critic-verdict.schema.json` for any real (non-empty) card, by
-design (see `agents/fake.py`) — this is not specific to this run; any real
-evidence set run with `--critic fake` will hit the same wall until either
-a real second provider becomes available or a dedicated research-only mode
-is deliberately built (out of scope here, per the standing instruction not
-to invent one).
+### Fact 1 — Acquisition verdict: PASS
+
+The Phase 2B acquisition bridge worked exactly as designed: a real
+`GITHUB_TOKEN`, real Search API calls on a GitHub-hosted runner, a real
+orphan data branch (never an Actions artifact), deterministic exact-identity
+dedup, and — after this correction — deterministic round-robin selection
+(§2, §7) and a stronger bot filter (§3). Every acceptance minimum in §9 was
+met or exceeded on the first cold run. This fact does not depend on
+anything below it.
+
+Note: the specific 100 records analyzed in §3-§8 below were selected by
+this run, *before* the round-robin selection fix — i.e. among the 128
+eligible-but-over-cap records, selection followed the old alphabetic-
+sort-then-cap order, which is exactly the sampling bias §2's correction
+removed. This trial's own committed dataset is not re-selected or re-run to
+correct this (that would mean re-spending the 100-call analyst budget); a
+separate, analyst-free acquisition run verifies the selection fix directly
+(see the correction note).
+
+### Fact 2 — Analyst discovery result: USEFUL BUT BIASED
+
+`demand-radar run --analyst claude` produced 8 real, evidence-linked
+opportunity candidates from real GitHub issues (§4, §8) — not a synthetic
+or cherry-picked set. Candidate 1 (memory-profiler ownership mapping) is a
+genuinely strong, differentiated signal: 11 independent authors, confidence
+0.74, a framing ("map retention to ownership," not "detect leaks") that the
+evidence itself shows existing commercial tools don't cover. But the source
+is biased — mostly 2014-2017 issues (§7), GitHub-`is:issue`-only, and
+overwhelmingly technical rather than commercial (§6: commercial_intent
+0.0-0.1 across all 8 candidates). "Useful" here describes a real technical/
+problem signal, not a commercially validated opportunity.
+
+### Fact 3 — Production run verdict: BLOCKED / immediate cause: analyst `BLOCKED_TIMEOUT`
+
+`demand-radar run --product own-audit --analyst claude --critic fake`
+returned the real production `overall_verdict()` result: **BLOCKED**, exit
+code 2. Per `verification.py`, `overall_verdict()` checks `BLOCKED` first:
+it returns `BLOCKED` if *either* the analyst's or the critic's derived
+status is in `{BLOCKED_AUTH, BLOCKED_USAGE, BLOCKED_TIMEOUT,
+BLOCKED_NOT_INSTALLED, NOT_RUN}` — before it ever considers FAIL or PASS.
+In this run, the analyst's 96 live `classify` calls included one real
+`BLOCKED_TIMEOUT` (alongside 3 `FAIL_INVALID_OUTPUT` and 92 successes). That
+single timeout alone is sufficient to make the analyst's derived status
+`BLOCKED_TIMEOUT`, which alone is sufficient to make `overall_verdict()`
+return `BLOCKED` — independent of anything the critic did. **This is the
+correction to the earlier version of this report**, which incorrectly
+attributed the BLOCKED result to the critic.
+
+### Fact 4 — Critic status: `FAIL_INVALID_OUTPUT` / cause: `FakeRunner`'s `{}` fails schema
+
+Separately from Fact 3: all 8 `critic_review` calls (`--critic fake`)
+returned `FakeRunner`'s hardcoded default output, `{}`, which cannot pass
+`critic-verdict.schema.json` for any real, non-empty-required card, by
+design (see `agents/fake.py`) — not specific to this run's data; any real
+evidence set hits the same wall with `--critic fake`. Had the analyst *not*
+also hit `BLOCKED_TIMEOUT`, this critic failure mode alone would have
+produced a run-level **FAIL**, not **BLOCKED** — `FAIL` and `BLOCKED` are
+different, mutually exclusive branches of `overall_verdict()`. This run's
+BLOCKED result is fully explained by Fact 3 alone; the critic's
+`FAIL_INVALID_OUTPUT` is real, worth recording, and was never the
+proximate cause of BLOCKED.
+
+### Fact 5 — Validation status: not `experiment_ready`, for two independent reasons
+
+Set Fact 3 and Fact 4 aside and imagine a hypothetical rerun with no
+analyst timeout and a real, working critic. This dataset would *still* not
+clear `judge_opportunity()`'s gates to `experiment_ready`, because
+`products/own-audit.yaml` sets `thresholds.minimum_source_families: 2`, and
+every accepted record in this dataset has `source_family="github"` — one
+family. `judge.py`'s source-diversity gate is its own step in the gate
+sequence, independent of the critic-presence check; an all-GitHub dataset
+cannot pass it regardless of critic behavior. **Both of the following
+claims from an earlier version of this report are withdrawn**: that critic
+absence was "the only reason this run doesn't carry a clean PASS," and that
+"a real independent critic would likely support a USEFUL verdict" for this
+dataset — both were unproven when written, and the source-families gate
+shows they were also incorrect. The accurate statement: **the ownership-
+path candidate (cluster 1) is a promising technical/problem signal, but it
+is not commercially validated and not `experiment_ready`** — for two
+independent reasons (no live critic; a single source family), neither of
+which a GitHub-only correction can resolve.
+
+### Summary
 
 This is a **different kind of incomplete** than Phase 2A's
 `INSUFFICIENT_EXTERNAL_RECORDS`: there, the data itself didn't exist in the
 needed shape. Here, real acquisition, real ingest, and real analyst
-reasoning all worked well — cluster 1 in particular is a genuinely strong,
-well-evidenced, differentiated candidate — and the *only* reason this run
-doesn't carry a clean `PASS` is the architectural critic gap that has stood
-since the Codex-freeze. If a real independent critic existed, this dataset
-would likely support a `USEFUL` verdict; without one, the honest status is
-`BLOCKED_BY_CRITIC_REQUIREMENT`, and that is reported plainly rather than
-either forcing a false pass or discarding real, substantive analyst output.
+reasoning all worked well, and cluster 1 is a genuinely strong candidate by
+the evidence alone — but the path from here to `experiment_ready` needs
+both a live critic *and* a second, independent source family (Fact 5).
+Neither is in scope for this correction, per the explicit instruction not
+to expand the query pack or add a source family here; both are named as the
+logical next scope (not Codex).
+
+**Final verdict field (original Phase 2B enum):
+`BLOCKED_BY_CRITIC_REQUIREMENT`.** Read together with Fact 5: this label
+names *one of two* independent, unmet requirements for validation — not the
+only one. Neither `NEEDS_QUERY_TUNING` nor `SOURCE_TOO_NOISY` nor
+`INSUFFICIENT_RECORDS` fits (the source is neither noisy nor under-volume,
+per §9's own numbers); `USEFUL` is withheld because validation genuinely has
+not completed, for reasons this report's scope cannot resolve alone.
 
 ## Commands, run ID, artifacts
 

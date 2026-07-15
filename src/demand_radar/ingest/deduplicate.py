@@ -46,11 +46,44 @@ class _UnionFind:
             self.parent[ra] = rb
 
 
+def _repo_key(item: EvidenceItem) -> str | None:
+    """'owner/repo' for a github_issue source_id ('github_issue:owner/repo#123'),
+    else None. None means "boundary unknown" -- callers treat that as a
+    cross-repo pair (the strict threshold), never as same-repo leniency by
+    default, since a false "same project" assumption is the riskier error.
+    """
+    if item.source.source_family != "github":
+        return None
+    source_id = item.source.source_id
+    if ":" not in source_id:
+        return None
+    _, rest = source_id.split(":", 1)
+    if "#" not in rest:
+        return None
+    repo, _ = rest.rsplit("#", 1)
+    return repo or None
+
+
 def deduplicate_evidence(
-    items: list[EvidenceItem], *, similarity_threshold: float
+    items: list[EvidenceItem],
+    *,
+    similarity_threshold: float,
+    cross_repo_similarity_threshold: float | None = None,
 ) -> list[DuplicateLink]:
     """items must all belong to one product. Returns one link per
-    *non-canonical* member of every group with more than one member."""
+    *non-canonical* member of every group with more than one member.
+
+    `cross_repo_similarity_threshold`, when given, applies only to pairs
+    whose derived repo keys differ (or are unknown) -- same-repo pairs
+    keep `similarity_threshold` exactly as before. This exists because a
+    live GitHub run found a real false-positive collapse (EWSoftware/
+    VSSpellChecker#30 with NuGet/Home#3474 at score 0.594, two unrelated
+    issues in unrelated repos, both using generic issue-template language
+    that inflates cross-repo cosine similarity) at a score the base
+    threshold was never calibrated to reject cross-repo, only same-repo
+    (see DeduplicationConfig's docstring). Omitting the argument (the
+    default) reproduces the exact prior single-threshold behavior.
+    """
     n = len(items)
     if n < 2:
         return []
@@ -73,11 +106,18 @@ def deduplicate_evidence(
             if items[i].content.content_hash == items[j].content.content_hash:
                 record_edge(i, j, "same_content_hash", 1.0)
 
+    repo_keys = [_repo_key(it) for it in items]
     similarity = pairwise_similarity([it.content.normalized_text for it in items])
     for i in range(n):
         for j in range(i + 1, n):
             score = similarity[i][j]
-            if score >= similarity_threshold:
+            same_repo = repo_keys[i] is not None and repo_keys[i] == repo_keys[j]
+            threshold = (
+                similarity_threshold
+                if same_repo or cross_repo_similarity_threshold is None
+                else cross_repo_similarity_threshold
+            )
+            if score >= threshold:
                 record_edge(i, j, "similar_text", score)
 
     groups: dict[int, list[int]] = {}

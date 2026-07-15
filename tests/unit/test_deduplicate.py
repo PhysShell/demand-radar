@@ -130,3 +130,123 @@ def test_no_duplicates_when_all_distinct() -> None:
     )
     links = deduplicate_evidence([a, b], similarity_threshold=0.5)
     assert links == []
+
+
+# --- cross-repo false-dedup regression -----------------------------------
+#
+# A live GitHub run (docs/trials/github-live-issues-trial.md) found a real
+# false collapse: EWSoftware/VSSpellChecker#30 (a missing menu item) and
+# NuGet/Home#3474 (NuGet Package Manager freezing VS) scored 0.594 under
+# the shared similarity_threshold=0.5 -- two unrelated issues in unrelated
+# repos, both using generic GitHub issue-template boilerplate ("Bug report",
+# "To Reproduce", "Steps to reproduce the behavior", "Desktop (please
+# complete the following information)"). The text below reproduces that
+# shape and scores in the same 0.5-0.75 band (0.636), without quoting the
+# real issue bodies verbatim.
+
+_SPELLCHECKER_LIKE_TEXT = """Bug report
+
+Describe the bug: Spell Options menu item missing from Tools menu entirely.
+
+To Reproduce
+Steps to reproduce the behavior:
+1. Go to Tools menu
+2. Look for Spell Options
+3. Item is absent
+
+Expected behavior: A clear and concise description of what you expected to happen.
+
+Desktop (please complete the following information):
+- OS: Windows 10
+- Version: 2015.1
+"""
+
+_NUGET_LIKE_TEXT = """Bug report
+
+Describe the bug: Nuget Package Manager froze VS 2015 completely on open.
+
+To Reproduce
+Steps to reproduce the behavior:
+1. Go to Tools menu
+2. Open NuGet Package Manager
+3. Application freezes
+
+Expected behavior: A clear and concise description of what you expected to happen.
+
+Desktop (please complete the following information):
+- OS: Windows 10
+- Version: 2015.1
+"""
+
+
+def test_cross_repo_similar_boilerplate_is_not_collapsed_with_stricter_threshold() -> None:
+    a = make_evidence_item(
+        source_kind="github_issue",
+        source_id="github_issue:EWSoftware/VSSpellChecker#30",
+        source_family="github",
+        published_at=T0,
+        raw_text=_SPELLCHECKER_LIKE_TEXT,
+    )
+    b = make_evidence_item(
+        source_kind="github_issue",
+        source_id="github_issue:NuGet/Home#3474",
+        source_family="github",
+        published_at=T0,
+        raw_text=_NUGET_LIKE_TEXT,
+    )
+    # Sanity check this fixture actually reproduces the observed shape: above
+    # the same-repo threshold (which is why the old single-threshold code
+    # collapsed it) but below the new cross-repo threshold.
+    links_old_behavior = deduplicate_evidence([a, b], similarity_threshold=0.5)
+    assert len(links_old_behavior) == 1, "fixture must score >= 0.5 to reproduce the original bug"
+
+    links = deduplicate_evidence(
+        [a, b], similarity_threshold=0.5, cross_repo_similarity_threshold=0.75
+    )
+    assert links == [], "different repos, generic shared boilerplate -- must not collapse"
+
+
+def test_same_repo_similar_boilerplate_still_collapses_with_stricter_cross_repo_threshold() -> None:
+    """Same text pair, same repo this time -- proves the fix is scoped to
+    cross-repo pairs only and does not blunt same-repo sensitivity."""
+    a = make_evidence_item(
+        source_kind="github_issue",
+        source_id="github_issue:EWSoftware/VSSpellChecker#30",
+        source_family="github",
+        published_at=T0,
+        raw_text=_SPELLCHECKER_LIKE_TEXT,
+    )
+    b = make_evidence_item(
+        source_kind="github_issue",
+        source_id="github_issue:EWSoftware/VSSpellChecker#31",
+        source_family="github",
+        published_at=T0,
+        raw_text=_NUGET_LIKE_TEXT,
+    )
+    links = deduplicate_evidence(
+        [a, b], similarity_threshold=0.5, cross_repo_similarity_threshold=0.75
+    )
+    assert len(links) == 1, "same repo must still use the lenient same-repo threshold"
+    assert links[0].duplicate_reason == "similar_text"
+
+
+def test_cross_repo_threshold_omitted_reproduces_prior_single_threshold_behavior() -> None:
+    """No cross_repo_similarity_threshold passed -> identical to every
+    pre-existing call site and test in this file; confirms the new parameter
+    is opt-in, not a silent behavior change for existing callers."""
+    a = make_evidence_item(
+        source_kind="github_issue",
+        source_id="github_issue:EWSoftware/VSSpellChecker#30",
+        source_family="github",
+        published_at=T0,
+        raw_text=_SPELLCHECKER_LIKE_TEXT,
+    )
+    b = make_evidence_item(
+        source_kind="github_issue",
+        source_id="github_issue:NuGet/Home#3474",
+        source_family="github",
+        published_at=T0,
+        raw_text=_NUGET_LIKE_TEXT,
+    )
+    links = deduplicate_evidence([a, b], similarity_threshold=0.5)
+    assert len(links) == 1

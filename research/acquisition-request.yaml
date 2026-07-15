@@ -12,6 +12,13 @@
 #
 # See docs/trials/github-live-issues-trial.md for the resulting report once
 # a data branch exists.
+#
+# 2026-07-15 correction push: no change to product/query_id_prefix/queries/
+# max_records/body_truncate_chars below -- this push exists only to trigger
+# one new acquisition run that exercises the corrected acquire_github_issues.py
+# (deterministic round-robin selection instead of sort-then-cap; stronger bot
+# filter) for real, per the correction scope in docs/decisions.log.md. Query
+# pack and source family are explicitly unchanged, per that same scope.
 
 product: own-audit
 query_id_prefix: own-audit-live
