@@ -431,3 +431,51 @@ triggered by this same push (a comment-only addition to
 limits) verifies the sampling and bot-filter fixes against real GitHub data,
 without re-running the 100-call Claude classification pipeline from the
 original trial. See the addendum below for that run's actual result.
+
+### Addendum — verification run result
+
+Workflow run `29439478053` completed (`success`, ~43s), data branch
+`research-data/own-audit-live-20260715T181121Z-29439478053`:
+
+```
+fetched total:        247
+excluded:               37  (bot_author: 36, physshell_owner: 1)
+duplicates (exact cross-query, source_id): 5
+eligible before cap:   205
+accepted (evidence.jsonl):    100
+selection_strategy: round_robin_by_query_order_then_source_id_sort
+```
+
+**Round-robin selection confirmed fair, on real data.** `accepted_per_query`
+is 11 for 8 of the 10 queries and 6 for the remaining 2
+(`propertychanged-performance-wpf`, `retained-object-wpf`) — exactly those
+2 queries' entire eligible count (6 each, `excluded_by_cap_per_query: 0` for
+both), meaning every eligible record from the two smaller queries was kept,
+while the 8 larger queries shared the remaining 88 slots evenly (11 each) —
+exactly what round-robin-until-exhausted produces. The arithmetic is
+self-consistent end to end: 247 fetched − 37 excluded − 5 duplicates = 205
+eligible; 205 eligible − 105 excluded-by-cap = 100 accepted, matching both
+`over_max_records_cap_count: 105` and `sum(accepted_per_query) == 100`
+exactly. No query was crowded out by another query's repo-name ASCII
+ordering, unlike the original run.
+
+**Bot filter confirmed on real data.** The new `unique_authors` list (90
+names) contains none of `firebird-automations`, `GoogleCodeExporter`,
+`ironpythonbot`, or `orchardbot` (checked case-insensitively). `bot_author`
+exclusions rose to 36 (vs. 16 in the original run) — a different underlying
+GitHub dataset at a different point in time, so not a like-for-like
+before/after count on the same records, but it confirms the mechanism
+(`user.type=="Bot"` plus the 4 named logins) does real, additional work on
+live data, not only in the synthetic unit tests.
+
+Not re-verified here, by design, per the correction's own scope: the
+dedup-threshold fix (already verified directly against the *original*
+trial's real data — see `docs/trials/github-live-issues-trial.md` §2, not
+repeated against this new dataset) and the `order=desc` fetch change (a
+one-line, unambiguous diff; this run's successful completion confirms the
+API accepts the parameter — its effect on issue recency is not separately
+re-analyzed, since doing so would need the analyst to run against this new
+dataset, out of scope here). This new data branch is a verification
+artifact only: it is not ingested, not analyzed, and is not the trial's
+dataset of record — `docs/trials/github-live-issues-trial.md` continues to
+describe run `29430642497` exactly as originally collected.
