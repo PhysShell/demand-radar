@@ -1,0 +1,48 @@
+# Demand Radar -- Phase 2B "GitHub Actions Acquisition Bridge" request.
+#
+# Editing and pushing this file is how you ask for a run: the workflow
+# (.github/workflows/acquire-github-issues.yml) triggers on any push that
+# changes this path. That is deliberate, not a fallback -- the agent that
+# authored this bridge has no general network egress and cannot add
+# cross-owner GitHub repositories from its own session, so it cannot invoke
+# workflow_dispatch either; a push it CAN make (ordinary git push to this
+# repo) has to be sufficient on its own. workflow_dispatch is wired as a
+# secondary manual input only -- see the workflow file -- and acceptance of
+# this bridge never depends on it firing.
+#
+# See docs/trials/github-live-issues-trial.md for the resulting report once
+# a data branch exists.
+
+product: own-audit
+query_id_prefix: own-audit-live
+
+# Hard caps -- scripts/acquire_github_issues.py enforces both; this file
+# cannot raise them past what the script's own constants allow (see
+# MAX_RECORDS_CEILING / BODY_TRUNCATE_CEILING there), only lower them.
+max_records: 100
+body_truncate_chars: 8000
+
+# .NET/C#/WPF lifetime-and-performance domain only, matching
+# products/own-audit.yaml. Do not add React/Android/Java query packs here --
+# that is a different product/scope, not a parameter of this one.
+queries:
+  - id: memory-leak-csharp
+    q: '"memory leak" language:C# is:issue'
+  - id: wpf-memory-leak
+    q: '"WPF memory leak" is:issue'
+  - id: event-handler-leak-csharp
+    q: '"event handler leak" language:C# is:issue'
+  - id: idisposable-leak-csharp
+    q: '"IDisposable leak" language:C# is:issue'
+  - id: systemevents-leak-csharp
+    q: '"SystemEvents" leak language:C# is:issue'
+  - id: propertychanged-performance-wpf
+    q: '"PropertyChanged performance" WPF is:issue'
+  - id: retained-object-wpf
+    q: '"retained object" WPF is:issue'
+  - id: large-wpf-application-performance
+    q: '"large WPF application" performance is:issue'
+  - id: dotnet-framework-memory-profiler
+    q: '".NET Framework" memory profiler is:issue'
+  - id: dependency-cycle-csharp-architecture
+    q: '"dependency cycle" C# architecture is:issue'
