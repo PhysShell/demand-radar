@@ -1,0 +1,77 @@
+# Demand Radar -- Phase 2C1 "Stack Overflow Acquisition" request.
+#
+# Same acceptance-independence pattern as research/acquisition-request.yaml
+# (Phase 2B): editing and pushing this file IS the "run acquisition" input,
+# since this agent's own session has no general network egress and cannot
+# invoke workflow_dispatch either. The workflow
+# (.github/workflows/acquire-stackoverflow-questions.yml) triggers on any
+# push that changes this path.
+#
+# See docs/trials/phase-2c-combined-trial.md for the resulting report once
+# a data branch exists.
+
+product: own-audit
+site: stackoverflow
+query_id_prefix: own-audit-stackoverflow
+
+# Hard caps -- scripts/acquire_stackoverflow_questions.py enforces all of
+# these; this file cannot raise them past what the script's own constants
+# allow, only lower them.
+max_records: 100
+body_truncate_chars: 8000
+page_size: 30
+
+# Stack Exchange API v2.3 /search/advanced parameters, applied to every
+# query below. from_date is a floor, not a rolling window: it stays fixed
+# at 2018-05-02 across runs so results are comparable over time, not
+# "the last N years as of whenever this happened to run."
+from_date: "2018-05-02"
+sort: creation
+order: desc
+
+# .NET/C#/WPF lifetime-and-performance domain only, matching
+# products/own-audit.yaml and the same domain Phase 2B's GitHub query pack
+# covers -- this is deliberately the second source family for the SAME
+# problem space, not a new product scope. Do not add unrelated tags/query
+# packs here, and do not widen this pack to chase the acceptance minimums
+# on the first live run -- an empty or noisy query is itself a result.
+queries:
+  - id: wpf-memory-leak
+    tagged: [wpf]
+    q: "memory leak"
+
+  - id: csharp-memory-leak
+    tagged: ["c#"]
+    q: "memory leak"
+
+  - id: memory-profiler-root-cause
+    tagged: ["c#"]
+    q: "memory profiler retained object"
+
+  - id: event-handler-retention
+    tagged: ["c#"]
+    q: "event handler memory leak"
+
+  - id: idisposable-ownership
+    tagged: ["c#"]
+    q: "IDisposable dispose memory leak"
+
+  - id: propertychanged-performance
+    tagged: [wpf]
+    q: "PropertyChanged performance"
+
+  - id: dependencyproperty-retention
+    tagged: [wpf]
+    q: "DependencyPropertyDescriptor AddValueChanged"
+
+  - id: systemevents-retention
+    tagged: ["c#"]
+    q: "SystemEvents memory leak"
+
+  - id: large-wpf-performance
+    tagged: [wpf]
+    q: "large WPF application performance"
+
+  - id: architecture-dependency-cycle
+    tagged: ["c#"]
+    q: "dependency cycle architecture"
