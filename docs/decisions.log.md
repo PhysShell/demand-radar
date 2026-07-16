@@ -539,3 +539,64 @@ rewrite after that touches only the copy. SHA-256 of six canonical files
 `verification.json`, `packet-manifest.json`) recorded before the scope
 began and re-verified identical afterward — see
 `docs/trials/phase-2c-review-pipeline-smoke.md` §2.
+
+## 2026-07-16 — Correction: `import_reviews`'s write phase was not atomic
+
+Arbiter code review of Phase 2C-SMOKE found one real remaining defect,
+not caught by any test at the time: `import_reviews()` validated a full
+review batch atomically (nothing written if any envelope fails
+validation), but the **write** phase that follows a successful validation
+was not. `Store.upsert_critic_verdict()` committed once per row, and
+`import_reviews()` wrote the archived-input file and appended to
+`reviews/provenance.jsonl` interleaved with those per-row commits, before
+the last row of the batch was even reached. A failure partway through a
+batch — envelope 10 of 19, say — would have left prior verdicts
+permanently committed, `provenance.jsonl` partially written, and the
+archived-import artifact fully present, despite the import as a whole
+never completing. This is a shared code path: the gap applied identically
+to real human-review imports and to the fixture path Phase 2C-SMOKE
+exercised, even though the smoke run's own 19/19 batch happened not to hit
+it (nothing failed mid-write on that run).
+
+**Fix**, `src/demand_radar/storage/sqlite.py` +
+`src/demand_radar/review.py`:
+
+1. New `Store.upsert_critic_verdicts_batch()`: stages every verdict in the
+   batch (`_stage_critic_verdict` — the existing `INSERT ... ON CONFLICT`,
+   minus the commit) inside one SQLite transaction, commits once at the
+   end; any exception rolls back and re-raises before anything is
+   durable. Transaction-boundary logic stays inside `Store` — a first
+   draft exposed public `commit()`/`rollback()` wrappers for `review.py`
+   to call around a loop; reconsidered before any test ran, since that
+   leaks SQLite specifics out of the storage layer for no benefit over one
+   method owning the whole transaction. The pre-existing single-row
+   `upsert_critic_verdict()` (real-time agent-critic path) is untouched
+   and still commits per call, confirmed unaffected by the full
+   pre-existing suite passing unchanged.
+2. `import_reviews()`'s write phase now stages both the archived-input
+   file and the full combined `provenance.jsonl` content (existing content
+   plus the new batch's lines, since provenance is append-only — the
+   staged content is the complete post-import file, not a delta) to
+   `.staging`-suffixed paths, calls `upsert_critic_verdicts_batch()`, and
+   only `Path.rename()`s both staged files into place after that call
+   returns successfully. Any exception deletes both staged files and
+   raises a new `ReviewWritePhaseError` — zero verdicts committed,
+   `provenance.jsonl` exactly as before the call, no archived artifact.
+
+**Verification**: `tests/unit/test_review_import_atomicity.py` (3 new
+tests) inject a failure via a call-counting monkeypatch on
+`Store._stage_critic_verdict` (raises on an exact 1-indexed call number
+across the test) rather than simulating a real disk/OS failure —
+`test_human_import_write_phase_failure_rolls_back_completely` and
+`test_fixture_import_write_phase_failure_rolls_back_completely` each fail
+a 3-opportunity batch on its 2nd write and assert zero committed verdicts,
+no `provenance.jsonl`, and an empty/absent `reviews/imports/`;
+`test_second_batch_write_phase_failure_leaves_first_batchs_provenance_untouched`
+proves the stronger property that a failed second batch does not corrupt
+or extend a prior successful batch's already-committed provenance and
+artifacts. Full offline gate: **257 tests passed** (254 prior + 3 new),
+`ruff check` clean, `ruff format --check` clean, `mypy --strict src`
+clean. Canonical run (`runs/phase-2c/`) untouched — code/test/doc-only
+change. See `docs/trials/phase-2c-review-pipeline-smoke.md` §13 for the
+report-facing correction (§9 and §12's original, imprecise use of
+"atomic" qualified in place).

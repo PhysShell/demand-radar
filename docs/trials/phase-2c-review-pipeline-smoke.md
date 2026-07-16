@@ -3,6 +3,13 @@
 Status: **PIPELINE_SMOKE_PASS** for this scope. **Canonical Phase 2C status
 is unchanged: AWAITING_HUMAN_REVIEW.**
 
+**Correction applied 2026-07-16, same day as the original run below: the
+import write phase was not actually atomic** — see §13. Every fact and
+transcript in §1-§12 describes the smoke run exactly as it happened and is
+unchanged; §9's and §12's use of the word "atomic" is qualified by §13,
+which is the full, precise account of what was and wasn't guaranteed at
+the time.
+
 This is a purely technical, mechanical test: review packet → synthetic
 fixture generation → hash/schema validation → atomic review import →
 deterministic finalize → regenerated report/verification. **It is not an
@@ -267,8 +274,10 @@ correct hashes), rejection without `--allow-test-fixture`, rejection in a
 run with no `task.yaml` and in one shaped like a real pipeline run but
 without the `test_fixture` marker, rejection of mixing fixture/human
 reviews, stale opportunity/evidence hash rejection, unknown-opportunity
-rejection, malformed nested `CriticVerdict` rejection, atomic batch import,
-provenance marked synthetic, a complete fixture set reaching mechanics
+rejection, malformed nested `CriticVerdict` rejection, atomic batch import
+**(validation-phase: a batch is rejected wholesale if any one envelope
+fails validation, before any write — see §13 for the separate write-phase
+guarantee added afterward)**, provenance marked synthetic, a complete fixture set reaching mechanics
 completeness, a partial set staying blocked, finalize calling no agent,
 fixture finalize never producing `experiment_ready` or
 `externally_validated`. The real human-review workflow's own test suite
@@ -318,6 +327,12 @@ fixture opportunities externally_validated:  0
 published CI quality-gate:                   success
 ```
 
+`atomic fixture import` above describes this run's own outcome (19/19
+committed together, nothing partial) and the validation-phase guarantee
+that was true at the time; it did not yet mean the write phase itself was
+structurally guaranteed atomic on a mid-batch failure — see §13, corrected
+the same day.
+
 **Scope verdict: PIPELINE_SMOKE_PASS.**
 
 ```
@@ -326,3 +341,82 @@ Independent human review: NOT PERFORMED
 Market validation: NOT PERFORMED
 Canonical Phase 2C status: AWAITING_HUMAN_REVIEW
 ```
+
+## 13. Correction — write-phase atomicity was not guaranteed at the time of this run
+
+Found by arbiter code review, not by a test or by inspection on my own
+part: `import_reviews()` validated a full batch atomically (§5's "zero
+mutation" rejection is real and unaffected by this), but the **write**
+phase that follows a successful validation was not atomic. Precisely:
+`Store.upsert_critic_verdict()` committed once per row, and
+`import_reviews()` wrote the archived-input file and appended to
+`reviews/provenance.jsonl` interleaved with those per-row commits, before
+the batch's last row was even reached. A failure partway through — on
+opportunity 10 of 19, say — would have left prior verdicts permanently
+committed, `provenance.jsonl` partially written, and the archived-import
+artifact fully present, despite the import as a whole never completing.
+This run's own 19/19 batch happened not to hit this, since nothing failed
+mid-write — so every fact in §1-§12 stands — but the code did not
+*guarantee* that outcome the way the report's use of "atomic" implied, and
+the gap applies identically to real human-review imports, since
+`import_reviews()` is one shared code path for both.
+
+**Fix**, in `src/demand_radar/storage/sqlite.py` and
+`src/demand_radar/review.py`:
+
+- New `Store.upsert_critic_verdicts_batch()`: every verdict in a batch is
+  staged (`_stage_critic_verdict`, the same `INSERT ... ON CONFLICT` as
+  before, minus the commit) inside one SQLite transaction, committed once
+  at the end; any exception rolls back and re-raises before anything is
+  durable. The existing single-row `upsert_critic_verdict()` (the
+  real-time agent-critic path, one verdict per call) is untouched and
+  still commits per call — confirmed by the full pre-existing suite
+  passing unchanged.
+- `import_reviews()`'s write phase now stages both the archived-input file
+  and the full combined `provenance.jsonl` content (existing content plus
+  the new batch's lines — provenance is append, not overwrite, so the
+  staged content is the complete post-import file, not just the delta) to
+  `.staging`-suffixed paths, calls
+  `upsert_critic_verdicts_batch()`, and only `Path.rename()`s both staged
+  files into place after that call returns successfully. Any exception
+  (SQL or otherwise) deletes both staged files and raises a new
+  `ReviewWritePhaseError` — zero verdicts committed, `provenance.jsonl`
+  exactly as it was before the call (untouched if this was the first
+  import, unextended if a prior import had already succeeded), no archived
+  import artifact.
+- Transaction-boundary logic stays inside `Store` rather than exposing
+  `commit()`/`rollback()` for `review.py` to call directly — a deliberate
+  encapsulation choice made while implementing this, not the first draft.
+
+**Verification**: `tests/unit/test_review_import_atomicity.py` (3 new
+tests, self-contained, mirroring this repository's existing
+one-file-per-concern test convention) inject a failure via a
+call-counting monkeypatch on `Store._stage_critic_verdict` — raising on an
+exact call number, 1-indexed, across the test — rather than simulating a
+real disk/OS failure:
+
+- `test_human_import_write_phase_failure_rolls_back_completely` and
+  `test_fixture_import_write_phase_failure_rolls_back_completely`: a
+  3-opportunity batch (human and fixture respectively) fails on its 2nd
+  write; both assert all 3 opportunities have zero committed verdict,
+  `provenance.jsonl` does not exist, and `reviews/imports/` is empty or
+  absent.
+- `test_second_batch_write_phase_failure_leaves_first_batchs_provenance_untouched`,
+  a stronger property than "provenance doesn't exist": a first batch
+  (`opp_a`) imports successfully, a second batch (`opp_b`, `opp_c`) then
+  fails on its very first write; asserts `opp_a`'s verdict, its
+  `provenance.jsonl` line, and its archived-import file are all still
+  present and byte-identical to before the second batch was attempted,
+  while `opp_b`/`opp_c` have zero verdicts.
+
+Full offline gate re-run after the fix: **257 tests passed** (254 prior +
+3 new), `ruff check` clean, `ruff format --check` clean, `mypy --strict
+src` clean. The canonical run (`runs/phase-2c/`) was not touched by this
+correction — it is a code/test/doc-only change, verified the same way as
+every prior correction in this engagement: full offline gate, then
+published CI on the commit (see `docs/decisions.log.md`'s matching entry
+for the exact run id).
+
+This report does not declare its own freeze or acceptance status — that
+verdict belongs to the arbiter's review, consistent with every other scope
+in this engagement.

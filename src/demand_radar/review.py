@@ -41,12 +41,21 @@ FIXTURE_GENERATOR_NAME = "demand-radar-review-smoke"
 
 
 class ReviewError(Exception):
-    """Base for every review-workflow failure -- always raised before any
-    store/filesystem write, never after a partial one."""
+    """Base for every review-workflow failure. Every failure either happens
+    before any write starts (validation -- ReviewValidationError) or is
+    fully rolled back if it happens during the write phase itself
+    (ReviewWritePhaseError) -- never leaves a partial batch either way."""
 
 
 class ReviewPacketError(ReviewError):
     pass
+
+
+class ReviewWritePhaseError(ReviewError):
+    """The batch passed validation in full, but a failure occurred while
+    committing it (SQL, disk, or otherwise). Always rolled back before this
+    is raised: zero verdicts committed, provenance.jsonl unchanged, no
+    archived import file left behind -- see import_reviews' write phase."""
 
 
 class ReviewValidationError(ReviewError):
@@ -745,44 +754,72 @@ def import_reviews(
         seen_in_batch.add(envelope.opportunity_id)
 
     # Every envelope validated -- nothing above this line touched the store
-    # or the filesystem. Only now do we write.
+    # or the filesystem. The write phase below is a single atomic unit: all
+    # verdicts share one SQLite transaction (upsert_critic_verdicts_batch
+    # rolls back and re-raises on any failure -- nothing is durable until
+    # its internal commit succeeds), and both files are written to a
+    # staging path first, only renamed into their real location after that
+    # commit succeeds. A failure anywhere in this block -- SQL, disk,
+    # anything -- leaves exactly the pre-import state: zero verdicts
+    # committed, provenance.jsonl unchanged, no archived import file. See
+    # ReviewWritePhaseError.
     file_hash = sha256_text(text)
     imports_dir = run_dir / "reviews" / "imports"
     imports_dir.mkdir(parents=True, exist_ok=True)
     stamp = imported_at.strftime("%Y%m%dT%H%M%SZ")
     imported_file_path = imports_dir / f"{stamp}-{file_hash.split(':', 1)[1][:12]}.jsonl"
-    imported_file_path.write_bytes(raw_bytes)
 
     provenance_path = run_dir / "reviews" / "provenance.jsonl"
     provenance_path.parent.mkdir(parents=True, exist_ok=True)
-    with provenance_path.open("a", encoding="utf-8") as f:
-        for envelope in envelopes:
-            store.upsert_critic_verdict(run_id, envelope.verdict)
-            record: dict[str, Any]
-            if isinstance(envelope, ReviewFixtureEnvelope):
-                record = {
-                    "source_kind": "test_fixture",
-                    "opportunity_id": envelope.opportunity_id,
-                    "fixture": envelope.fixture.model_dump(mode="json"),
-                    "generated_at": envelope.generated_at.isoformat(),
-                    "opportunity_hash": envelope.opportunity_hash,
-                    "evidence_manifest_hash": envelope.evidence_manifest_hash,
-                    "imported_file_sha256": file_hash,
-                    "imported_at": imported_at.isoformat(),
-                }
-            else:
-                record = {
-                    "source_kind": "human",
-                    "opportunity_id": envelope.opportunity_id,
-                    "reviewer": envelope.reviewer.model_dump(mode="json"),
-                    "reviewed_at": envelope.reviewed_at.isoformat(),
-                    "opportunity_hash": envelope.opportunity_hash,
-                    "evidence_manifest_hash": envelope.evidence_manifest_hash,
-                    "attestation": envelope.attestation.model_dump(mode="json"),
-                    "imported_file_sha256": file_hash,
-                    "imported_at": imported_at.isoformat(),
-                }
-            f.write(json.dumps(record, sort_keys=True) + "\n")
+    existing_provenance = (
+        provenance_path.read_text(encoding="utf-8") if provenance_path.is_file() else ""
+    )
+
+    new_provenance_lines: list[str] = []
+    for envelope in envelopes:
+        record: dict[str, Any]
+        if isinstance(envelope, ReviewFixtureEnvelope):
+            record = {
+                "source_kind": "test_fixture",
+                "opportunity_id": envelope.opportunity_id,
+                "fixture": envelope.fixture.model_dump(mode="json"),
+                "generated_at": envelope.generated_at.isoformat(),
+                "opportunity_hash": envelope.opportunity_hash,
+                "evidence_manifest_hash": envelope.evidence_manifest_hash,
+                "imported_file_sha256": file_hash,
+                "imported_at": imported_at.isoformat(),
+            }
+        else:
+            record = {
+                "source_kind": "human",
+                "opportunity_id": envelope.opportunity_id,
+                "reviewer": envelope.reviewer.model_dump(mode="json"),
+                "reviewed_at": envelope.reviewed_at.isoformat(),
+                "opportunity_hash": envelope.opportunity_hash,
+                "evidence_manifest_hash": envelope.evidence_manifest_hash,
+                "attestation": envelope.attestation.model_dump(mode="json"),
+                "imported_file_sha256": file_hash,
+                "imported_at": imported_at.isoformat(),
+            }
+        new_provenance_lines.append(json.dumps(record, sort_keys=True))
+    combined_provenance = existing_provenance + "".join(
+        line + "\n" for line in new_provenance_lines
+    )
+
+    staged_import_path = imported_file_path.with_name(imported_file_path.name + ".staging")
+    staged_provenance_path = provenance_path.with_name(provenance_path.name + ".staging")
+    try:
+        staged_import_path.write_bytes(raw_bytes)
+        staged_provenance_path.write_text(combined_provenance, encoding="utf-8")
+        store.upsert_critic_verdicts_batch(run_id, [envelope.verdict for envelope in envelopes])
+    except Exception as exc:
+        staged_import_path.unlink(missing_ok=True)
+        staged_provenance_path.unlink(missing_ok=True)
+        raise ReviewWritePhaseError(
+            f"import write phase failed and was rolled back -- zero verdicts committed: {exc}"
+        ) from exc
+    staged_import_path.rename(imported_file_path)
+    staged_provenance_path.rename(provenance_path)
 
     return ReviewImportResult(
         imported_opportunity_ids=[e.opportunity_id for e in envelopes],

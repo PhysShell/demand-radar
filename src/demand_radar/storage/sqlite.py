@@ -342,6 +342,27 @@ class Store:
     # -- Critic verdicts --------------------------------------------------
 
     def upsert_critic_verdict(self, run_id: str, verdict: CriticVerdict) -> None:
+        self._stage_critic_verdict(run_id, verdict)
+        self.conn.commit()
+
+    def upsert_critic_verdicts_batch(self, run_id: str, verdicts: list[CriticVerdict]) -> None:
+        """All-or-nothing: every verdict in the batch commits together in
+        one transaction, or none do -- rolled back and re-raised on any
+        failure partway through. Used by review.py's atomic review import
+        (human or fixture reviews share this path); the real-time agent-
+        critic path still calls the single-verdict upsert_critic_verdict
+        above, one commit per call, unaffected by this.
+        """
+        try:
+            for verdict in verdicts:
+                self._stage_critic_verdict(run_id, verdict)
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+
+    def _stage_critic_verdict(self, run_id: str, verdict: CriticVerdict) -> None:
+        """Same INSERT as upsert_critic_verdict, without the commit."""
         self.conn.execute(
             """
             INSERT INTO critic_verdicts (opportunity_id, run_id, data)
@@ -354,7 +375,6 @@ class Store:
                 verdict.model_dump_json(by_alias=True, exclude_none=True),
             ),
         )
-        self.conn.commit()
 
     def get_critic_verdict(self, opportunity_id: str) -> CriticVerdict | None:
         row = self.conn.execute(
