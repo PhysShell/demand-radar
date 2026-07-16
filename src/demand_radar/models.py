@@ -367,6 +367,47 @@ class ReviewEnvelope(StrictModel):
 
 
 # --------------------------------------------------------------------------
+# ReviewFixtureEnvelope — Phase 2C-SMOKE. A synthetic, machine-generated
+# stand-in for a ReviewEnvelope used ONLY to exercise the export -> import ->
+# finalize pipeline's mechanics (hashing, schema validation, atomic import,
+# deterministic finalize). It is not a review, not independent, and not
+# market validation -- fixture.kind and .substantive_review_performed are
+# fixed Literals so a fixture can never be constructed claiming otherwise.
+# review.py's import path additionally requires --allow-test-fixture and a
+# run explicitly marked test_fixture=true before accepting one of these; a
+# real ReviewEnvelope never needs or accepts that flag. The nested verdict
+# reuses CriticVerdict unchanged, same as ReviewEnvelope.
+# --------------------------------------------------------------------------
+
+
+class ReviewFixtureMetadata(StrictModel):
+    kind: Literal["test_fixture"]
+    generator: str = Field(
+        min_length=1,
+        max_length=120,
+        description="Identifies what produced this fixture, e.g. "
+        "'demand-radar-review-smoke' (the CLI's own `review generate-fixtures` command).",
+    )
+    purpose: Literal["pipeline_mechanics_only"]
+    substantive_review_performed: Literal[False]
+
+
+class ReviewFixtureEnvelope(StrictModel):
+    schema_: Literal["demand-radar.review-fixture-envelope/1"] = Field(
+        default="demand-radar.review-fixture-envelope/1", alias="schema"
+    )
+    run_id: str = Field(min_length=1, max_length=120)
+    opportunity_id: str = Field(pattern=_OPPORTUNITY_ID)
+    fixture: ReviewFixtureMetadata
+    generated_at: datetime
+    opportunity_hash: str = Field(pattern=_SHA256)
+    evidence_manifest_hash: str = Field(pattern=_SHA256)
+    verdict: CriticVerdict
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+
+# --------------------------------------------------------------------------
 # Verification
 # --------------------------------------------------------------------------
 

@@ -27,6 +27,7 @@ from demand_radar.review import (
     ReviewError,
     export_review_packet,
     finalize_run,
+    generate_fixtures,
     import_reviews,
 )
 from demand_radar.storage.sqlite import DatabaseNotInitializedError, Store
@@ -402,12 +403,56 @@ def review_export(
     )
 
 
+PACKET_OPTION = typer.Option(
+    ..., "--packet", exists=True, file_okay=False, help="Path to an exported review packet."
+)
+FIXTURE_OUTPUT_OPTION = typer.Option(..., "--output", help="Path to write the fixture JSONL to.")
+
+
+@review_app.command("generate-fixtures")
+def review_generate_fixtures(
+    run_id: str = RUN_OPTION,
+    packet: Path = PACKET_OPTION,
+    output: Path = FIXTURE_OUTPUT_OPTION,
+) -> None:
+    """TEST FIXTURE ONLY -- generates one synthetic ReviewFixtureEnvelope per
+    opportunity in an exported review packet, for testing the export ->
+    import -> finalize pipeline's mechanics. Never calls an agent, never
+    reads evidence content, and is never a substantive review: every
+    generated verdict carries a fatal objection and recommends
+    `investigate`, never `experiment_ready`. Requires `review import
+    --allow-test-fixture` to import; a real ReviewEnvelope never needs or
+    accepts that flag."""
+    try:
+        result = generate_fixtures(
+            run_id=run_id, packet_dir=packet, output_path=output, generated_at=datetime.now(UTC)
+        )
+    except ReviewError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo("TEST FIXTURE ONLY -- synthetic pipeline-mechanics fixtures, not a review")
+    typer.echo(f"generated {len(result.fixtures)} fixture(s) at {result.output_path}")
+    for fixture in result.fixtures:
+        typer.echo(f"  {fixture.opportunity_id}")
+
+
+ALLOW_TEST_FIXTURE_OPTION = typer.Option(
+    False,
+    "--allow-test-fixture",
+    help="Required to import synthetic ReviewFixtureEnvelope records "
+    "(schemas/review-fixture-envelope.schema.json). A real human-authored "
+    "ReviewEnvelope batch never needs or accepts this flag.",
+)
+
+
 @review_app.command("import")
 def review_import(
     run_id: str = RUN_OPTION,
     input_path: Path = REVIEW_INPUT_OPTION,
     db: Path = DB_OPTION,
     runs_dir: Path = RUNS_DIR_OPTION,
+    allow_test_fixture: bool = ALLOW_TEST_FIXTURE_OPTION,
 ) -> None:
     """Atomically import a batch of completed review envelopes (JSONL, one
     ReviewEnvelope per line). Any invalid envelope rejects the whole batch
@@ -424,6 +469,7 @@ def review_import(
             run_id=run_id,
             input_path=input_path,
             imported_at=datetime.now(UTC),
+            allow_test_fixture=allow_test_fixture,
         )
     except ReviewError as exc:
         typer.echo(f"error: {exc}", err=True)
@@ -431,6 +477,8 @@ def review_import(
     finally:
         store.close()
 
+    if result.contains_test_fixture:
+        typer.echo("TEST FIXTURE ONLY -- mechanics validated, no substantive review performed")
     typer.echo(f"imported {len(result.imported_opportunity_ids)} review(s):")
     for opp_id in result.imported_opportunity_ids:
         typer.echo(f"  {opp_id}")

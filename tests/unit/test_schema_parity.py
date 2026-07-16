@@ -17,6 +17,7 @@ from demand_radar.models import (
     OpportunityCard,
     ProblemCluster,
     ReviewEnvelope,
+    ReviewFixtureEnvelope,
     Verification,
 )
 
@@ -38,6 +39,7 @@ def _validate_against_schema(payload: dict, schema_file: str) -> None:
         "critic-verdict.schema.json",
         "verification.schema.json",
         "review-envelope.schema.json",
+        "review-fixture-envelope.schema.json",
     ],
 )
 def test_schema_file_is_valid_json_schema(schema_file: str) -> None:
@@ -243,6 +245,77 @@ def test_review_envelope_round_trips_through_schema() -> None:
     )
     dumped = json.loads(envelope.model_dump_json(by_alias=True, exclude_none=True))
     _validate_against_schema(dumped, "review-envelope.schema.json")
+
+
+def test_review_fixture_envelope_round_trips_through_schema() -> None:
+    envelope = ReviewFixtureEnvelope.model_validate(
+        {
+            "schema": "demand-radar.review-fixture-envelope/1",
+            "run_id": "run-1-smoke",
+            "opportunity_id": "opp_abc123",
+            "fixture": {
+                "kind": "test_fixture",
+                "generator": "demand-radar-review-smoke",
+                "purpose": "pipeline_mechanics_only",
+                "substantive_review_performed": False,
+            },
+            "generated_at": "2026-07-16T00:00:00Z",
+            "opportunity_hash": f"sha256:{'a' * 64}",
+            "evidence_manifest_hash": f"sha256:{'b' * 64}",
+            "verdict": {
+                "schema": "demand-radar.critic-verdict/1",
+                "opportunity_id": "opp_abc123",
+                "recommended_status": "investigate",
+                "objections": [
+                    {
+                        "code": "other",
+                        "statement": "Synthetic test fixture only; no substantive independent "
+                        "review was performed.",
+                        "evidence_ids": [],
+                        "fatal": True,
+                    }
+                ],
+                "overclaim_check": {
+                    "overclaims": False,
+                    "statement": "Not evaluated; synthetic pipeline fixture.",
+                },
+                "notes": "TEST FIXTURE ONLY",
+            },
+        }
+    )
+    dumped = json.loads(envelope.model_dump_json(by_alias=True, exclude_none=True))
+    _validate_against_schema(dumped, "review-fixture-envelope.schema.json")
+
+
+def test_review_fixture_metadata_rejects_true_substantive_review_performed() -> None:
+    """substantive_review_performed is Literal[False] -- Pydantic must make
+    a fixture claiming a real review impossible to construct at all, the
+    same way Reviewer.kind: Literal["human"] does for reviewer.kind."""
+    with pytest.raises(Exception):  # noqa: B017 - pydantic ValidationError
+        ReviewFixtureEnvelope.model_validate(
+            {
+                "schema": "demand-radar.review-fixture-envelope/1",
+                "run_id": "run-1",
+                "opportunity_id": "opp_abc123",
+                "fixture": {
+                    "kind": "test_fixture",
+                    "generator": "x",
+                    "purpose": "pipeline_mechanics_only",
+                    "substantive_review_performed": True,
+                },
+                "generated_at": "2026-07-16T00:00:00Z",
+                "opportunity_hash": f"sha256:{'a' * 64}",
+                "evidence_manifest_hash": f"sha256:{'b' * 64}",
+                "verdict": {
+                    "schema": "demand-radar.critic-verdict/1",
+                    "opportunity_id": "opp_abc123",
+                    "recommended_status": "investigate",
+                    "objections": [],
+                    "overclaim_check": {"overclaims": False, "statement": ""},
+                    "notes": "",
+                },
+            }
+        )
 
 
 def test_unknown_field_rejected_by_model() -> None:

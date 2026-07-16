@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.demand-radar.dev/review-fixture-envelope/1",
+  "title": "ReviewFixtureEnvelope",
+  "description": "A synthetic, machine-generated review envelope used ONLY to test the mechanics of the review export -> import -> finalize pipeline (hash/schema validation, atomic import, deterministic finalize). It is not a review: fixture.substantive_review_performed is always false, and it must never be importable as if it were a human review (see schemas/review-envelope.schema.json) or accepted without the operator explicitly passing --allow-test-fixture to `demand-radar review import`. Only importable into a run explicitly marked test_fixture=true in its task.yaml, never into a normal or canonical run, and never mixed with real human reviews in the same run.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "run_id", "opportunity_id", "fixture", "generated_at",
+    "opportunity_hash", "evidence_manifest_hash", "verdict"
+  ],
+  "properties": {
+    "schema": { "const": "demand-radar.review-fixture-envelope/1" },
+    "run_id": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "opportunity_id": { "type": "string", "pattern": "^opp_[a-zA-Z0-9_-]+$" },
+    "fixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "generator", "purpose", "substantive_review_performed"],
+      "properties": {
+        "kind": { "const": "test_fixture" },
+        "generator": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Identifies what produced this fixture, e.g. 'demand-radar-review-smoke' (the CLI's own `review generate-fixtures` command)."
+        },
+        "purpose": {
+          "const": "pipeline_mechanics_only",
+          "description": "The only purpose this contract supports. A fixture is never a stand-in for a review of any other kind."
+        },
+        "substantive_review_performed": {
+          "const": false,
+          "description": "Always false by construction -- a fixture that claimed otherwise would be a contradiction in terms."
+        }
+      }
+    },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "opportunity_hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "Hash of the OpportunityCard as exported. review import re-derives this from the current store and rejects the envelope if it no longer matches (stale or tampered)."
+    },
+    "evidence_manifest_hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "Hash of the evidence.jsonl exported for this card. Re-derived and checked the same way as opportunity_hash."
+    },
+    "verdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "opportunity_id", "recommended_status", "objections", "overclaim_check", "notes"],
+      "properties": {
+        "schema": { "const": "demand-radar.critic-verdict/1" },
+        "opportunity_id": { "type": "string", "pattern": "^opp_[a-zA-Z0-9_-]+$" },
+        "recommended_status": {
+          "type": "string",
+          "enum": ["experiment_ready", "investigate", "rejected"],
+          "description": "review import rejects any fixture verdict that recommends experiment_ready -- a synthetic fixture must never be able to push a card toward the one status that claims real validation, regardless of what a fixture generator sends."
+        },
+        "objections": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["code", "statement", "evidence_ids", "fatal"],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "complaint_not_purchase_intent",
+                  "single_viral_source_dominant",
+                  "duplicate_or_copied_content",
+                  "audience_lacks_budget",
+                  "free_substitute_sufficient",
+                  "educational_not_commercial",
+                  "removes_enjoyable_activity",
+                  "required_input_unavailable",
+                  "implementation_cost_dominates",
+                  "evidence_supports_different_wedge",
+                  "overclaims_evidence",
+                  "other"
+                ]
+              },
+              "statement": { "type": "string", "minLength": 1, "maxLength": 400 },
+              "evidence_ids": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": { "type": "string", "pattern": "^ev_[a-zA-Z0-9_-]+$" },
+                "description": "Must belong to the opportunity card under review -- review import rejects an objection evidence_id that exists but belongs to a different card."
+              },
+              "fatal": { "type": "boolean" }
+            }
+          }
+        },
+        "overclaim_check": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["overclaims", "statement"],
+          "properties": {
+            "overclaims": { "type": "boolean" },
+            "statement": { "type": "string", "maxLength": 400 }
+          }
+        },
+        "notes": { "type": "string", "maxLength": 500 }
+      }
+    }
+  }
+}

@@ -26,10 +26,18 @@ from demand_radar.agents.base import NeverCalledRunner, sha256_file, sha256_text
 from demand_radar.config import ProductConfig
 from demand_radar.graph.nodes.finalize import deterministic_judge, render_report, verify_run
 from demand_radar.graph.state import DemandState, RunContext
-from demand_radar.models import EvidenceItem, OpportunityCard, ReviewEnvelope
+from demand_radar.models import (
+    EvidenceItem,
+    Objection,
+    OpportunityCard,
+    ReviewEnvelope,
+    ReviewFixtureEnvelope,
+)
 from demand_radar.storage.sqlite import Store
 
 REVIEW_ENVELOPE_SCHEMA_ID = "demand-radar.review-envelope/1"
+REVIEW_FIXTURE_ENVELOPE_SCHEMA_ID = "demand-radar.review-fixture-envelope/1"
+FIXTURE_GENERATOR_NAME = "demand-radar-review-smoke"
 
 
 class ReviewError(Exception):
@@ -74,6 +82,55 @@ def hash_opportunity_card(card: OpportunityCard) -> str:
 
 def hash_evidence_manifest(evidence_items: list[EvidenceItem]) -> str:
     return sha256_text(_canonical_evidence_manifest_jsonl(evidence_items))
+
+
+# --- test-fixture run marking (Phase 2C-SMOKE) --------------------------------
+#
+# A test fixture is never importable into an arbitrary run just because the
+# caller passed --allow-test-fixture: the *run itself* must be explicitly
+# set up for pipeline-mechanics smoke testing first, via
+# mark_run_as_test_fixture. This is the structural backstop that keeps a
+# fixture out of a normal or canonical run even if an operator fat-fingers
+# the flag -- the run has to have been deliberately prepared, not just
+# permitted at import time.
+
+
+def mark_run_as_test_fixture(run_dir: Path, *, kind: str, canonical_parent_run: str) -> None:
+    """Adds the markers `_run_is_marked_test_fixture` reads back. Merges into
+    an existing task.yaml if present (e.g. one copied from the canonical run
+    being smoke-tested) rather than overwriting it, so run_id/product/
+    analyst/critic/started_at survive untouched.
+    """
+    task_yaml_path = run_dir / "task.yaml"
+    task: dict[str, Any] = {}
+    if task_yaml_path.is_file():
+        loaded = yaml.safe_load(task_yaml_path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            task = loaded
+    task["test_fixture"] = True
+    task["test_fixture_kind"] = kind
+    task["canonical_parent_run"] = canonical_parent_run
+    task_yaml_path.parent.mkdir(parents=True, exist_ok=True)
+    task_yaml_path.write_text(yaml.safe_dump(task, sort_keys=False), encoding="utf-8")
+
+
+def _run_is_marked_test_fixture(run_dir: Path) -> bool:
+    task_yaml_path = run_dir / "task.yaml"
+    if not task_yaml_path.is_file():
+        return False
+    task = yaml.safe_load(task_yaml_path.read_text(encoding="utf-8"))
+    return isinstance(task, dict) and task.get("test_fixture") is True
+
+
+def _provenance_source_kinds(run_dir: Path) -> set[str]:
+    provenance_path = run_dir / "reviews" / "provenance.jsonl"
+    if not provenance_path.is_file():
+        return set()
+    kinds: set[str] = set()
+    for line in provenance_path.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            kinds.add(json.loads(line)["source_kind"])
+    return kinds
 
 
 # --- review export -----------------------------------------------------------
@@ -276,52 +333,156 @@ def export_review_packet(
     )
 
 
+# --- fixture generation (Phase 2C-SMOKE, pipeline-mechanics testing only) ------
+
+
+def _build_fixture_envelope(
+    *,
+    run_id: str,
+    opportunity_id: str,
+    opportunity_hash: str,
+    evidence_manifest_hash: str,
+    generated_at: datetime,
+) -> ReviewFixtureEnvelope:
+    """The verdict is fixed, not configurable: recommended_status is always
+    `investigate` and the one objection is always fatal, so a fixture can
+    never (even by generator misconfiguration) push a card toward
+    experiment_ready -- validate_review_fixture_envelope enforces the same
+    thing again at import time, independently.
+    """
+    return ReviewFixtureEnvelope.model_validate(
+        {
+            "schema": REVIEW_FIXTURE_ENVELOPE_SCHEMA_ID,
+            "run_id": run_id,
+            "opportunity_id": opportunity_id,
+            "fixture": {
+                "kind": "test_fixture",
+                "generator": FIXTURE_GENERATOR_NAME,
+                "purpose": "pipeline_mechanics_only",
+                "substantive_review_performed": False,
+            },
+            "generated_at": generated_at.isoformat(),
+            "opportunity_hash": opportunity_hash,
+            "evidence_manifest_hash": evidence_manifest_hash,
+            "verdict": {
+                "schema": "demand-radar.critic-verdict/1",
+                "opportunity_id": opportunity_id,
+                "recommended_status": "investigate",
+                "objections": [
+                    {
+                        "code": "other",
+                        "statement": "Synthetic test fixture only; no substantive independent "
+                        "review was performed.",
+                        "evidence_ids": [],
+                        "fatal": True,
+                    }
+                ],
+                "overclaim_check": {
+                    "overclaims": False,
+                    "statement": "Not evaluated; synthetic pipeline fixture.",
+                },
+                "notes": "TEST FIXTURE ONLY",
+            },
+        }
+    )
+
+
+@dataclass
+class FixtureGenerationResult:
+    fixtures: list[ReviewFixtureEnvelope]
+    output_path: Path
+
+
+def generate_fixtures(
+    *, run_id: str, packet_dir: Path, output_path: Path, generated_at: datetime
+) -> FixtureGenerationResult:
+    """Reads only packet-manifest.json -- never opportunity.json or
+    evidence.jsonl content -- and stamps one ReviewFixtureEnvelope per
+    opportunity using the manifest's own, already-computed opportunity/
+    evidence hashes. Calls no agent. Output is deterministic: opportunity
+    ids are sorted, and each envelope serializes in the model's fixed field
+    order.
+    """
+    manifest_path = packet_dir / "packet-manifest.json"
+    if not manifest_path.is_file():
+        raise ReviewPacketError(
+            f"{manifest_path} does not exist -- run `demand-radar review export` first"
+        )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    opportunity_ids = sorted(manifest["opportunity_ids"])
+    fixtures = [
+        _build_fixture_envelope(
+            run_id=run_id,
+            opportunity_id=opp_id,
+            opportunity_hash=manifest["opportunity_hashes"][opp_id],
+            evidence_manifest_hash=manifest["evidence_manifest_hashes"][opp_id],
+            generated_at=generated_at,
+        )
+        for opp_id in opportunity_ids
+    ]
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        "\n".join(f.model_dump_json(by_alias=True, exclude_none=True) for f in fixtures) + "\n",
+        encoding="utf-8",
+    )
+    return FixtureGenerationResult(fixtures=fixtures, output_path=output_path)
+
+
 # --- review import -------------------------------------------------------------
 
 
-def validate_review_envelope(
-    envelope: ReviewEnvelope,
+def _validate_envelope_identity(
     *,
+    opp_id: str,
+    envelope_run_id: str,
+    envelope_verdict_opportunity_id: str,
     run_id: str,
     card: OpportunityCard | None,
-    evidence_items_by_id: dict[str, EvidenceItem],
-    already_reviewed_opportunity_ids: set[str],
-    seen_in_this_batch: set[str],
-) -> None:
-    """Pure given pre-fetched data (no store/filesystem access here).
-    Raises ReviewValidationError on the first failed check; returns None
-    if every check passes.
+) -> OpportunityCard:
+    """Shared by both ReviewEnvelope and ReviewFixtureEnvelope: run/
+    opportunity identity checks that don't depend on which kind of envelope
+    this is. Raises on the first failure; returns the resolved card
+    (never None past this point) so callers don't re-check for it.
     """
-    opp_id = envelope.opportunity_id
-    if envelope.run_id != run_id:
+    if envelope_run_id != run_id:
         raise ReviewValidationError(
-            opp_id, f"run_id mismatch: envelope has {envelope.run_id!r}, importing into {run_id!r}"
+            opp_id,
+            f"run_id mismatch: envelope has {envelope_run_id!r}, importing into {run_id!r}",
         )
     if card is None:
         raise ReviewValidationError(
             opp_id, f"opportunity {opp_id!r} does not exist in run {run_id!r}"
         )
-    if envelope.verdict.opportunity_id != opp_id:
+    if envelope_verdict_opportunity_id != opp_id:
         raise ReviewValidationError(
             opp_id,
-            f"verdict.opportunity_id {envelope.verdict.opportunity_id!r} does not match "
+            f"verdict.opportunity_id {envelope_verdict_opportunity_id!r} does not match "
             f"envelope.opportunity_id {opp_id!r}",
         )
-    # reviewer.kind is not re-checked here: ReviewEnvelope's Pydantic model
-    # types it Literal["human"], so model_validate() already makes any
-    # other value impossible to construct -- nothing to defend against.
-    if not envelope.attestation.reviewed_primary_evidence:
-        raise ReviewValidationError(opp_id, "attestation.reviewed_primary_evidence must be true")
-    if not envelope.attestation.review_not_generated_by_analyst_provider:
-        raise ReviewValidationError(
-            opp_id, "attestation.review_not_generated_by_analyst_provider must be true"
-        )
+    return card
 
+
+def _validate_envelope_hashes_and_objections(
+    *,
+    opp_id: str,
+    card: OpportunityCard,
+    envelope_opportunity_hash: str,
+    envelope_evidence_manifest_hash: str,
+    envelope_objections: list[Objection],
+    evidence_items_by_id: dict[str, EvidenceItem],
+    already_reviewed_opportunity_ids: set[str],
+    seen_in_this_batch: set[str],
+) -> None:
+    """Shared by both ReviewEnvelope and ReviewFixtureEnvelope: hash
+    freshness, objection-evidence membership, and duplicate-review
+    rejection -- identical integrity requirements regardless of who or what
+    produced the envelope.
+    """
     expected_opp_hash = hash_opportunity_card(card)
-    if envelope.opportunity_hash != expected_opp_hash:
+    if envelope_opportunity_hash != expected_opp_hash:
         raise ReviewValidationError(
             opp_id,
-            f"opportunity_hash stale or tampered: envelope has {envelope.opportunity_hash!r}, "
+            f"opportunity_hash stale or tampered: envelope has {envelope_opportunity_hash!r}, "
             f"current card hashes to {expected_opp_hash!r}",
         )
 
@@ -330,15 +491,15 @@ def validate_review_envelope(
         evidence_items_by_id[eid] for eid in card_evidence_ids if eid in evidence_items_by_id
     ]
     expected_evidence_hash = hash_evidence_manifest(current_evidence_items)
-    if envelope.evidence_manifest_hash != expected_evidence_hash:
+    if envelope_evidence_manifest_hash != expected_evidence_hash:
         raise ReviewValidationError(
             opp_id,
             f"evidence_manifest_hash stale or tampered: envelope has "
-            f"{envelope.evidence_manifest_hash!r}, current evidence hashes to "
+            f"{envelope_evidence_manifest_hash!r}, current evidence hashes to "
             f"{expected_evidence_hash!r}",
         )
 
-    for objection in envelope.verdict.objections:
+    for objection in envelope_objections:
         for eid in objection.evidence_ids:
             if eid not in evidence_items_by_id:
                 raise ReviewValidationError(
@@ -362,11 +523,100 @@ def validate_review_envelope(
         )
 
 
+def validate_review_envelope(
+    envelope: ReviewEnvelope,
+    *,
+    run_id: str,
+    card: OpportunityCard | None,
+    evidence_items_by_id: dict[str, EvidenceItem],
+    already_reviewed_opportunity_ids: set[str],
+    seen_in_this_batch: set[str],
+) -> None:
+    """Pure given pre-fetched data (no store/filesystem access here).
+    Raises ReviewValidationError on the first failed check; returns None
+    if every check passes.
+    """
+    opp_id = envelope.opportunity_id
+    resolved_card = _validate_envelope_identity(
+        opp_id=opp_id,
+        envelope_run_id=envelope.run_id,
+        envelope_verdict_opportunity_id=envelope.verdict.opportunity_id,
+        run_id=run_id,
+        card=card,
+    )
+    # reviewer.kind is not re-checked here: ReviewEnvelope's Pydantic model
+    # types it Literal["human"], so model_validate() already makes any
+    # other value impossible to construct -- nothing to defend against.
+    if not envelope.attestation.reviewed_primary_evidence:
+        raise ReviewValidationError(opp_id, "attestation.reviewed_primary_evidence must be true")
+    if not envelope.attestation.review_not_generated_by_analyst_provider:
+        raise ReviewValidationError(
+            opp_id, "attestation.review_not_generated_by_analyst_provider must be true"
+        )
+    _validate_envelope_hashes_and_objections(
+        opp_id=opp_id,
+        card=resolved_card,
+        envelope_opportunity_hash=envelope.opportunity_hash,
+        envelope_evidence_manifest_hash=envelope.evidence_manifest_hash,
+        envelope_objections=envelope.verdict.objections,
+        evidence_items_by_id=evidence_items_by_id,
+        already_reviewed_opportunity_ids=already_reviewed_opportunity_ids,
+        seen_in_this_batch=seen_in_this_batch,
+    )
+
+
+def validate_review_fixture_envelope(
+    envelope: ReviewFixtureEnvelope,
+    *,
+    run_id: str,
+    card: OpportunityCard | None,
+    evidence_items_by_id: dict[str, EvidenceItem],
+    already_reviewed_opportunity_ids: set[str],
+    seen_in_this_batch: set[str],
+) -> None:
+    """Same shape as validate_review_envelope, for the synthetic pipeline-
+    mechanics-only contract. import_reviews() is what enforces
+    --allow-test-fixture and the run's test_fixture=true marker -- this
+    function only checks the envelope itself, exactly like its human
+    counterpart only checks the envelope itself.
+    """
+    opp_id = envelope.opportunity_id
+    resolved_card = _validate_envelope_identity(
+        opp_id=opp_id,
+        envelope_run_id=envelope.run_id,
+        envelope_verdict_opportunity_id=envelope.verdict.opportunity_id,
+        run_id=run_id,
+        card=card,
+    )
+    # fixture.kind and fixture.substantive_review_performed are not
+    # re-checked here: ReviewFixtureMetadata types them Literal["test_fixture"]
+    # / Literal[False], so model_validate() already makes any other value
+    # impossible to construct -- same reasoning as reviewer.kind above.
+    if envelope.verdict.recommended_status == "experiment_ready":
+        raise ReviewValidationError(
+            opp_id,
+            "fixture verdict must not recommend experiment_ready -- a synthetic pipeline-"
+            "mechanics fixture must never be able to push a card toward the one status that "
+            "claims real validation",
+        )
+    _validate_envelope_hashes_and_objections(
+        opp_id=opp_id,
+        card=resolved_card,
+        envelope_opportunity_hash=envelope.opportunity_hash,
+        envelope_evidence_manifest_hash=envelope.evidence_manifest_hash,
+        envelope_objections=envelope.verdict.objections,
+        evidence_items_by_id=evidence_items_by_id,
+        already_reviewed_opportunity_ids=already_reviewed_opportunity_ids,
+        seen_in_this_batch=seen_in_this_batch,
+    )
+
+
 @dataclass
 class ReviewImportResult:
     imported_opportunity_ids: list[str]
     imported_file_path: Path
     imported_file_sha256: str
+    contains_test_fixture: bool = False
 
 
 def import_reviews(
@@ -376,10 +626,24 @@ def import_reviews(
     run_id: str,
     input_path: Path,
     imported_at: datetime,
+    allow_test_fixture: bool = False,
 ) -> ReviewImportResult:
     """Atomic: every envelope in `input_path` is fully validated before any
     of them are written. A single invalid envelope rejects the whole batch
     with zero mutation to the store or run_dir.
+
+    A batch is either all ReviewEnvelope (real human review) or all
+    ReviewFixtureEnvelope (synthetic pipeline-mechanics test), dispatched
+    per line on its `schema` field -- never mixed within one batch, and
+    never mixed across separate import calls into the same run (checked
+    against reviews/provenance.jsonl's own record of what kind has already
+    landed here). A fixture envelope is rejected unless allow_test_fixture=
+    True AND run_dir's task.yaml is explicitly marked test_fixture=true
+    (see mark_run_as_test_fixture) -- deliberately two independent gates,
+    so neither an operator's flag alone nor a run's marker alone is enough.
+    A real ReviewEnvelope batch is entirely unaffected by
+    allow_test_fixture or the run's marker either way -- it never needs or
+    looks at either.
     """
     raw_bytes = input_path.read_bytes()
     try:
@@ -390,18 +654,62 @@ def import_reviews(
     if not lines:
         raise ReviewValidationError(None, f"{input_path} contains no review envelopes")
 
-    envelopes: list[ReviewEnvelope] = []
+    envelopes: list[ReviewEnvelope | ReviewFixtureEnvelope] = []
+    fixture_flags: list[bool] = []
     for i, line in enumerate(lines, start=1):
         try:
             raw = json.loads(line)
         except json.JSONDecodeError as exc:
             raise ReviewValidationError(None, f"line {i}: invalid JSON: {exc}") from exc
+        schema_value = raw.get("schema") if isinstance(raw, dict) else None
+        is_fixture = schema_value == REVIEW_FIXTURE_ENVELOPE_SCHEMA_ID
+        envelope: ReviewEnvelope | ReviewFixtureEnvelope
         try:
-            envelopes.append(ReviewEnvelope.model_validate(raw))
+            if is_fixture:
+                envelope = ReviewFixtureEnvelope.model_validate(raw)
+            else:
+                envelope = ReviewEnvelope.model_validate(raw)
         except ValidationError as exc:
+            kind_name = "ReviewFixtureEnvelope" if is_fixture else "ReviewEnvelope"
             raise ReviewValidationError(
-                None, f"line {i}: does not match ReviewEnvelope schema: {exc}"
+                None, f"line {i}: does not match {kind_name} schema: {exc}"
             ) from exc
+        envelopes.append(envelope)
+        fixture_flags.append(is_fixture)
+
+    if len(set(fixture_flags)) > 1:
+        raise ReviewValidationError(
+            None, "batch mixes real human reviews and test fixture reviews -- not allowed"
+        )
+    batch_is_fixture = fixture_flags[0]
+
+    if batch_is_fixture:
+        if not allow_test_fixture:
+            raise ReviewValidationError(
+                None,
+                "batch contains test fixture envelope(s) -- pass --allow-test-fixture to "
+                "import them (never required or accepted for real human reviews)",
+            )
+        if not _run_is_marked_test_fixture(run_dir):
+            raise ReviewValidationError(
+                None,
+                f"run {run_id!r} is not marked test_fixture=true -- fixture envelopes may only "
+                "be imported into a run explicitly prepared for pipeline-mechanics smoke "
+                "testing, never a normal or canonical run",
+            )
+
+    existing_kinds = _provenance_source_kinds(run_dir)
+    if batch_is_fixture and "human" in existing_kinds:
+        raise ReviewValidationError(
+            None,
+            "this run already has an imported human review -- test fixtures cannot be mixed in",
+        )
+    if not batch_is_fixture and "test_fixture" in existing_kinds:
+        raise ReviewValidationError(
+            None,
+            "this run already has an imported test fixture review -- human reviews cannot be "
+            "mixed in",
+        )
 
     opportunities_by_id = {c.id: c for c in store.list_opportunity_cards_for_run(run_id)}
     already_reviewed = {
@@ -416,14 +724,24 @@ def import_reviews(
 
     seen_in_batch: set[str] = set()
     for envelope in envelopes:
-        validate_review_envelope(
-            envelope,
-            run_id=run_id,
-            card=opportunities_by_id.get(envelope.opportunity_id),
-            evidence_items_by_id=evidence_items_by_id,
-            already_reviewed_opportunity_ids=already_reviewed,
-            seen_in_this_batch=seen_in_batch,
-        )
+        if isinstance(envelope, ReviewFixtureEnvelope):
+            validate_review_fixture_envelope(
+                envelope,
+                run_id=run_id,
+                card=opportunities_by_id.get(envelope.opportunity_id),
+                evidence_items_by_id=evidence_items_by_id,
+                already_reviewed_opportunity_ids=already_reviewed,
+                seen_in_this_batch=seen_in_batch,
+            )
+        else:
+            validate_review_envelope(
+                envelope,
+                run_id=run_id,
+                card=opportunities_by_id.get(envelope.opportunity_id),
+                evidence_items_by_id=evidence_items_by_id,
+                already_reviewed_opportunity_ids=already_reviewed,
+                seen_in_this_batch=seen_in_batch,
+            )
         seen_in_batch.add(envelope.opportunity_id)
 
     # Every envelope validated -- nothing above this line touched the store
@@ -440,22 +758,37 @@ def import_reviews(
     with provenance_path.open("a", encoding="utf-8") as f:
         for envelope in envelopes:
             store.upsert_critic_verdict(run_id, envelope.verdict)
-            record = {
-                "opportunity_id": envelope.opportunity_id,
-                "reviewer": envelope.reviewer.model_dump(mode="json"),
-                "reviewed_at": envelope.reviewed_at.isoformat(),
-                "opportunity_hash": envelope.opportunity_hash,
-                "evidence_manifest_hash": envelope.evidence_manifest_hash,
-                "attestation": envelope.attestation.model_dump(mode="json"),
-                "imported_file_sha256": file_hash,
-                "imported_at": imported_at.isoformat(),
-            }
+            record: dict[str, Any]
+            if isinstance(envelope, ReviewFixtureEnvelope):
+                record = {
+                    "source_kind": "test_fixture",
+                    "opportunity_id": envelope.opportunity_id,
+                    "fixture": envelope.fixture.model_dump(mode="json"),
+                    "generated_at": envelope.generated_at.isoformat(),
+                    "opportunity_hash": envelope.opportunity_hash,
+                    "evidence_manifest_hash": envelope.evidence_manifest_hash,
+                    "imported_file_sha256": file_hash,
+                    "imported_at": imported_at.isoformat(),
+                }
+            else:
+                record = {
+                    "source_kind": "human",
+                    "opportunity_id": envelope.opportunity_id,
+                    "reviewer": envelope.reviewer.model_dump(mode="json"),
+                    "reviewed_at": envelope.reviewed_at.isoformat(),
+                    "opportunity_hash": envelope.opportunity_hash,
+                    "evidence_manifest_hash": envelope.evidence_manifest_hash,
+                    "attestation": envelope.attestation.model_dump(mode="json"),
+                    "imported_file_sha256": file_hash,
+                    "imported_at": imported_at.isoformat(),
+                }
             f.write(json.dumps(record, sort_keys=True) + "\n")
 
     return ReviewImportResult(
         imported_opportunity_ids=[e.opportunity_id for e in envelopes],
         imported_file_path=imported_file_path,
         imported_file_sha256=file_hash,
+        contains_test_fixture=batch_is_fixture,
     )
 
 
@@ -481,6 +814,38 @@ def _archive_preliminary_artifacts(run_dir: Path) -> None:
         if src.is_file():
             dst.parent.mkdir(parents=True, exist_ok=True)
             dst.write_bytes(src.read_bytes())
+
+
+def _write_test_fixture_review_marker_if_applicable(
+    run_dir: Path, *, store: Store, run_id: str
+) -> None:
+    """A separate, additive artifact -- deliberately never folded into
+    AgentRunStatus or verification.schema.json's checks (Phase 2C-SMOKE's
+    own scope boundary) -- so a synthetic pipeline-mechanics smoke run can
+    never be mistaken for a completed, substantive review just because
+    critic_status happened to read PASS. A no-op for a normal human-
+    reviewed run, AND for a partial fixture batch: nothing is written
+    unless every provenance record for this run came from a test fixture
+    *and* every opportunity in the run has a verdict -- purity alone isn't
+    enough, a partial fixture pass must not read as a completed one.
+    """
+    if _provenance_source_kinds(run_dir) != {"test_fixture"}:
+        return
+    opportunities = store.list_opportunity_cards_for_run(run_id)
+    if not opportunities or not all(
+        store.get_critic_verdict(card.id) is not None for card in opportunities
+    ):
+        return
+    marker = {
+        "review_channel_status": "TEST_FIXTURE_REVIEW",
+        "pipeline_mechanics": "PASS",
+        "substantive_review": "NOT_PERFORMED",
+    }
+    reviews_dir = run_dir / "reviews"
+    reviews_dir.mkdir(parents=True, exist_ok=True)
+    (reviews_dir / "review-channel-status.json").write_text(
+        json.dumps(marker, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
 
 def finalize_run(
@@ -530,4 +895,5 @@ def finalize_run(
     state.update(verify_run(cast(DemandState, state), config))
 
     state_path.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
+    _write_test_fixture_review_marker_if_applicable(run_dir, store=store, run_id=run_id)
     return cast(DemandState, state)
