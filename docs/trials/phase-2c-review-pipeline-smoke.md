@@ -3,12 +3,15 @@
 Status: **PIPELINE_SMOKE_PASS** for this scope. **Canonical Phase 2C status
 is unchanged: AWAITING_HUMAN_REVIEW.**
 
-**Correction applied 2026-07-16, same day as the original run below: the
-import write phase was not actually atomic** — see §13. Every fact and
-transcript in §1-§12 describes the smoke run exactly as it happened and is
-unchanged; §9's and §12's use of the word "atomic" is qualified by §13,
-which is the full, precise account of what was and wasn't guaranteed at
-the time.
+**Corrected twice, 2026-07-16, same day as the original run below: the
+import write phase was not actually atomic.** §13 fixed the SQLite side
+(batch transaction, no per-row commit). A second arbiter review of §13's
+own fix then found the two file-publish steps still sat outside the
+transaction boundary — §14 fixes that. Every fact and transcript in
+§1-§12 describes the smoke run exactly as it happened and is unchanged;
+§9's and §12's use of the word "atomic" is qualified by §13 and §14
+together, which are the full, precise account of what was and wasn't
+guaranteed at each point.
 
 This is a purely technical, mechanical test: review packet → synthetic
 fixture generation → hash/schema validation → atomic review import →
@@ -387,6 +390,10 @@ the gap applies identically to real human-review imports, since
 - Transaction-boundary logic stays inside `Store` rather than exposing
   `commit()`/`rollback()` for `review.py` to call directly — a deliberate
   encapsulation choice made while implementing this, not the first draft.
+  **Superseded by §14**: a second arbiter review round found this
+  particular choice couldn't survive the next correction — `commit()`/
+  `rollback()` ended up needing to be public after all, for a reason this
+  paragraph's own reasoning didn't anticipate.
 
 **Verification**: `tests/unit/test_review_import_atomicity.py` (3 new
 tests, self-contained, mirroring this repository's existing
@@ -416,6 +423,103 @@ correction — it is a code/test/doc-only change, verified the same way as
 every prior correction in this engagement: full offline gate, then
 published CI on the commit (see `docs/decisions.log.md`'s matching entry
 for the exact run id).
+
+**This section's own "atomic" claim turned out to be incomplete too** —
+see §14 for the second, more precise correction the same arbiter review
+thread required.
+
+## 14. Second correction — the two `rename()` calls were still outside the transaction boundary
+
+§13's fix made the SQLite side of the write phase genuinely atomic (one
+transaction, one commit, rollback on any exception during the insert
+loop) but left a second, distinct gap the arbiter's next review caught by
+reading the code precisely: both `staged_import_path.rename(...)` and
+`staged_provenance_path.rename(...)` ran **after**
+`upsert_critic_verdicts_batch()`'s internal commit had already succeeded,
+and **outside** the surrounding `try`/`except`. §13's own claim —
+"Any exception (SQL or otherwise) deletes both staged files... zero
+verdicts committed" — was true for exceptions during validation or during
+the SQL insert loop, but not for a failure in either `rename()` call
+itself: at that point the verdicts were already durably committed, so a
+failure publishing either file would have left one of:
+
+- first `rename` fails: verdicts committed, no import artifact, stale
+  provenance, orphaned staging file.
+- second `rename` fails: verdicts committed, import artifact published,
+  stale provenance, orphaned staged provenance file.
+
+The 3 tests §13 added never exercised this window — they all injected
+their failure into `Store._stage_critic_verdict`, strictly before the
+commit and both renames, so they could not have caught this even in
+principle.
+
+**Fix**, same two files: the commit itself now happens *last*, after both
+files are already published, so the operation that's hardest to undo
+happens only once nothing durable is left un-coordinated:
+
+1. `Store.upsert_critic_verdicts_batch()` is gone. In its place,
+   `Store.stage_critic_verdicts()` inserts every verdict in the current
+   transaction without committing, and `Store.commit()`/`Store.rollback()`
+   are now public. This does re-expose the transaction boundary that §13
+   deliberately kept inside `Store` — necessary this time, not an
+   oversight: the commit decision now depends on filesystem operations
+   `import_reviews()` performs, in `review.py`, between the insert and the
+   commit, so no method living entirely inside `Store` can own the whole
+   operation the way `upsert_critic_verdicts_batch()` tried to.
+2. `import_reviews()`'s write phase now runs, in order: stage both files
+   → insert verdicts (no commit) → back up the existing `provenance.jsonl`
+   (`shutil.copy2`, only if one exists yet) → `os.replace` the import
+   artifact into place → `os.replace` the staged provenance into place →
+   `store.commit()`. Any exception at any step: `store.rollback()`, delete
+   the import artifact if it was published, restore `provenance.jsonl`
+   from its backup (or delete it, if this was the run's first-ever
+   import) if it was replaced, delete every staging/backup file, raise
+   `ReviewWritePhaseError`.
+3. Stated precisely, per the arbiter's own framing: this is exception-safe
+   *within this process*, not a journaled two-phase commit across SQLite
+   and the filesystem — a `kill -9` or power loss between the two
+   `os.replace` calls is out of scope, the same practical boundary this
+   project's other atomicity claims already use.
+
+**Verification**: `tests/unit/test_review_import_atomicity.py` grew by 4
+tests, covering exactly the three windows the arbiter named plus the
+"prior successful batch survives" property applied to the new window:
+
+- `test_import_artifact_publish_failure_rolls_back_completely` — the
+  first `os.replace` (import artifact) fails.
+- `test_provenance_publish_failure_after_artifact_published_rolls_back_completely`
+  — the second `os.replace` (provenance) fails after the first already
+  succeeded; proves the published artifact gets un-published.
+- `test_second_batch_provenance_publish_failure_restores_first_batch_byte_identical`
+  — same window, against a run with a prior successful import already on
+  disk; proves the backup-and-restore path specifically (not just
+  delete-the-new-file).
+- `test_sqlite_commit_failure_after_both_files_published_rolls_back_completely`
+  — the exact case the arbiter named explicitly: `store.commit()` itself
+  fails after both files are already published.
+
+Each asserts the same five properties the arbiter specified: zero new
+verdicts, prior verdicts (if any) untouched, `provenance.jsonl`
+byte-identical to before the failed batch, the import artifact absent (or,
+for a second-batch test, the first batch's artifact still present and
+nothing extra), and no `.staging`/`.bak` file left anywhere under the run
+directory.
+
+**Sanity-checked, not just written and run once**: before trusting these
+4 tests, the fix's `store.commit()` call was deliberately moved one line
+earlier (immediately after the first `os.replace`, before the second) to
+reintroduce the exact bug shape the arbiter found — 2 of the 4 new tests
+failed immediately against that mutated code, with `pytest` showing a
+committed verdict where the test expected `None`. The correct ordering was
+then restored and reverified. This is not part of the permanent test
+suite (there is no "mutation test" checked in) — it was a one-time check
+that these specific tests actually fail when the bug they target is
+present, not just that they pass against already-correct code.
+
+Full offline gate re-run after this second fix: **261 tests passed** (257
+prior + 4 new), `ruff check` clean, `ruff format --check` clean, `mypy
+--strict src` clean. Canonical run (`runs/phase-2c/`) untouched — again a
+code/test/doc-only change.
 
 This report does not declare its own freeze or acceptance status — that
 verdict belongs to the arbiter's review, consistent with every other scope

@@ -600,3 +600,70 @@ clean. Canonical run (`runs/phase-2c/`) untouched — code/test/doc-only
 change. See `docs/trials/phase-2c-review-pipeline-smoke.md` §13 for the
 report-facing correction (§9 and §12's original, imprecise use of
 "atomic" qualified in place).
+
+## 2026-07-16 — Second correction: the write phase's two file `rename()`s were still outside the transaction boundary
+
+Same day, same arbiter thread: a second review of the fix directly above
+found it incomplete. `import_reviews()`'s write phase now inserted every
+verdict in one SQLite transaction (the previous entry's fix), but the two
+`Path.rename()` calls that published the import artifact and
+`provenance.jsonl` still ran **after** that transaction's commit and
+**outside** the `try`/`except` protecting it. A failure in either
+`rename()` — a real, ordinary filesystem failure mode, not a contrived
+one — would have left verdicts permanently committed with either no
+import artifact (first `rename` fails) or a stale `provenance.jsonl`
+(either `rename` fails, since neither reaching `provenance.jsonl` nor
+reaching the artifact alone completes the batch). The 3 tests the
+previous entry added could not have caught this: all 3 injected their
+failure into `Store._stage_critic_verdict`, strictly before the commit
+and both renames, so the window this correction covers was untested by
+construction, not just untested by oversight.
+
+**Fix**, `src/demand_radar/storage/sqlite.py` +
+`src/demand_radar/review.py`: `Store.upsert_critic_verdicts_batch()` (the
+previous entry's single opaque method) is replaced by
+`Store.stage_critic_verdicts()` (insert without commit) plus public
+`Store.commit()`/`Store.rollback()`. This re-exposes exactly the
+transaction boundary the previous entry deliberately kept inside `Store`
+— necessary, not a reversion: the commit now has to happen *after* two
+filesystem operations that `Store` cannot see, so no method living
+entirely inside `Store` can own the decision. `import_reviews()`'s write
+phase now runs, strictly in order: stage both files → insert verdicts,
+no commit → back up the existing `provenance.jsonl` via `shutil.copy2`
+(only if one exists yet) → `os.replace` the import artifact into place →
+`os.replace` the staged provenance into place → `store.commit()` last,
+once nothing else can fail. Any exception at any step: roll back SQLite,
+delete the import artifact if it was published, restore
+`provenance.jsonl` from its backup (or delete it, if this batch was the
+run's first-ever import) if it was replaced, delete every staging/backup
+file, raise `ReviewWritePhaseError`. Stated at the same precision the
+arbiter used: exception-safe *within this process*, not a journaled
+two-phase commit — a `kill -9` or power loss between the two `os.replace`
+calls is out of scope, the same boundary this project's other atomicity
+claims already use.
+
+**Verification**: `tests/unit/test_review_import_atomicity.py` grew by 4
+tests covering the three windows named explicitly plus one strengthening
+case: `test_import_artifact_publish_failure_rolls_back_completely` (first
+`os.replace` fails), `test_provenance_publish_failure_after_artifact_published_rolls_back_completely`
+(second fails after the first succeeds — the published artifact must be
+un-published), `test_second_batch_provenance_publish_failure_restores_first_batch_byte_identical`
+(same window, against a run with a prior successful import already on
+disk — proves the backup-and-restore path, not just delete-the-new-file),
+and `test_sqlite_commit_failure_after_both_files_published_rolls_back_completely`
+(`store.commit()` itself fails after both files are already published).
+Each proves zero new verdicts, prior verdicts untouched,
+`provenance.jsonl` byte-identical to before the failed batch, the import
+artifact absent (or, for the second-batch test, unchanged from before
+that batch), and no `.staging`/`.bak` file left anywhere under the run
+directory. Before trusting these tests, `store.commit()` was deliberately
+moved one line earlier in the source (reintroducing the exact bug shape
+this correction fixes) to confirm 2 of the 4 new tests fail against it —
+they did, with a committed verdict where the test expected `None` — then
+the correct ordering was restored; this mutation check is not itself part
+of the checked-in suite. Full offline gate: **261 tests passed** (257
+prior + 4 new), `ruff check` clean, `ruff format --check` clean, `mypy
+--strict src` clean. Canonical run (`runs/phase-2c/`) untouched. See
+`docs/trials/phase-2c-review-pipeline-smoke.md` §14 for the report-facing
+correction, including a fix to a claim in §13 itself that this round made
+stale (the "commit/rollback stay inside Store" encapsulation choice).

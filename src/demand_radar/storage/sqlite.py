@@ -345,21 +345,27 @@ class Store:
         self._stage_critic_verdict(run_id, verdict)
         self.conn.commit()
 
-    def upsert_critic_verdicts_batch(self, run_id: str, verdicts: list[CriticVerdict]) -> None:
-        """All-or-nothing: every verdict in the batch commits together in
-        one transaction, or none do -- rolled back and re-raised on any
-        failure partway through. Used by review.py's atomic review import
-        (human or fixture reviews share this path); the real-time agent-
-        critic path still calls the single-verdict upsert_critic_verdict
-        above, one commit per call, unaffected by this.
+    def stage_critic_verdicts(self, run_id: str, verdicts: list[CriticVerdict]) -> None:
+        """Insert every verdict in the current transaction without
+        committing -- the caller owns the commit/rollback boundary. Used by
+        review.py's atomic import, which must not commit until an import
+        artifact and provenance.jsonl are also safely published to disk
+        (see import_reviews' write phase for why the boundary can't live
+        inside Store alone: a failure publishing either file must roll this
+        transaction back too, and a failure committing after both files are
+        published must un-publish them -- both directions cross the
+        SQLite/filesystem line). The real-time agent-critic path still calls
+        the single-verdict upsert_critic_verdict above, one commit per call,
+        unaffected by this.
         """
-        try:
-            for verdict in verdicts:
-                self._stage_critic_verdict(run_id, verdict)
-            self.conn.commit()
-        except Exception:
-            self.conn.rollback()
-            raise
+        for verdict in verdicts:
+            self._stage_critic_verdict(run_id, verdict)
+
+    def commit(self) -> None:
+        self.conn.commit()
+
+    def rollback(self) -> None:
+        self.conn.rollback()
 
     def _stage_critic_verdict(self, run_id: str, verdict: CriticVerdict) -> None:
         """Same INSERT as upsert_critic_verdict, without the commit."""

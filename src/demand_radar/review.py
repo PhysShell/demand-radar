@@ -14,6 +14,8 @@ is never market validation.
 from __future__ import annotations
 
 import json
+import os
+import shutil
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -754,15 +756,22 @@ def import_reviews(
         seen_in_batch.add(envelope.opportunity_id)
 
     # Every envelope validated -- nothing above this line touched the store
-    # or the filesystem. The write phase below is a single atomic unit: all
-    # verdicts share one SQLite transaction (upsert_critic_verdicts_batch
-    # rolls back and re-raises on any failure -- nothing is durable until
-    # its internal commit succeeds), and both files are written to a
-    # staging path first, only renamed into their real location after that
-    # commit succeeds. A failure anywhere in this block -- SQL, disk,
-    # anything -- leaves exactly the pre-import state: zero verdicts
-    # committed, provenance.jsonl unchanged, no archived import file. See
-    # ReviewWritePhaseError.
+    # or the filesystem. The write phase below is an exception-safe
+    # publication protocol spanning SQLite and the filesystem together:
+    # stage both files, insert every verdict without committing, back up
+    # the old provenance file, publish the import artifact, publish
+    # provenance (os.replace), and only then commit SQLite -- the step
+    # that's hardest to undo happens last, once both files are already
+    # safely in place. A failure at any point rolls the transaction back,
+    # un-publishes whichever file(s) were already published, restores
+    # provenance from its backup, and deletes every staging/backup file --
+    # leaving exactly the pre-import state: zero verdicts committed,
+    # provenance.jsonl unchanged, no archived import file. This can't live
+    # inside Store alone because the commit decision depends on filesystem
+    # operations Store can't see. See ReviewWritePhaseError. Exception-safe
+    # within this process only -- not a journaled 2-phase commit, so a
+    # kill -9 or power loss between the two publish steps is out of scope,
+    # same practical boundary this project's other "atomic" claims use.
     file_hash = sha256_text(text)
     imports_dir = run_dir / "reviews" / "imports"
     imports_dir.mkdir(parents=True, exist_ok=True)
@@ -771,8 +780,9 @@ def import_reviews(
 
     provenance_path = run_dir / "reviews" / "provenance.jsonl"
     provenance_path.parent.mkdir(parents=True, exist_ok=True)
+    provenance_existed_before = provenance_path.is_file()
     existing_provenance = (
-        provenance_path.read_text(encoding="utf-8") if provenance_path.is_file() else ""
+        provenance_path.read_text(encoding="utf-8") if provenance_existed_before else ""
     )
 
     new_provenance_lines: list[str] = []
@@ -808,18 +818,43 @@ def import_reviews(
 
     staged_import_path = imported_file_path.with_name(imported_file_path.name + ".staging")
     staged_provenance_path = provenance_path.with_name(provenance_path.name + ".staging")
+    provenance_backup_path = provenance_path.with_name(provenance_path.name + ".bak")
+
+    import_published = False
+    provenance_replaced = False
     try:
         staged_import_path.write_bytes(raw_bytes)
         staged_provenance_path.write_text(combined_provenance, encoding="utf-8")
-        store.upsert_critic_verdicts_batch(run_id, [envelope.verdict for envelope in envelopes])
+
+        store.stage_critic_verdicts(run_id, [envelope.verdict for envelope in envelopes])
+
+        if provenance_existed_before:
+            shutil.copy2(provenance_path, provenance_backup_path)
+
+        os.replace(staged_import_path, imported_file_path)
+        import_published = True
+
+        os.replace(staged_provenance_path, provenance_path)
+        provenance_replaced = True
+
+        store.commit()
     except Exception as exc:
+        store.rollback()
+        if import_published:
+            imported_file_path.unlink(missing_ok=True)
+        if provenance_replaced:
+            if provenance_existed_before:
+                os.replace(provenance_backup_path, provenance_path)
+            else:
+                provenance_path.unlink(missing_ok=True)
         staged_import_path.unlink(missing_ok=True)
         staged_provenance_path.unlink(missing_ok=True)
+        provenance_backup_path.unlink(missing_ok=True)
         raise ReviewWritePhaseError(
             f"import write phase failed and was rolled back -- zero verdicts committed: {exc}"
         ) from exc
-    staged_import_path.rename(imported_file_path)
-    staged_provenance_path.rename(provenance_path)
+
+    provenance_backup_path.unlink(missing_ok=True)
 
     return ReviewImportResult(
         imported_opportunity_ids=[e.opportunity_id for e in envelopes],
