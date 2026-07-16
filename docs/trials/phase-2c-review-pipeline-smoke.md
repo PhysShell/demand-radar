@@ -1,7 +1,8 @@
 # Phase 2C-SMOKE: synthetic review pipeline test
 
-Status: **PIPELINE_SMOKE_PASS** for this scope. **Canonical Phase 2C status
-is unchanged: AWAITING_HUMAN_REVIEW.**
+Status: **ACCEPTED / CLOSED / FROZEN** — arbiter final verdict, frozen at
+commit `c70ec1e7d5e1606db8462db92b4e11bed947d049` (§15). **Canonical Phase
+2C status is unchanged and unaffected by this freeze: AWAITING_HUMAN_REVIEW.**
 
 **Corrected twice, 2026-07-16, same day as the original run below: the
 import write phase was not actually atomic.** §13 fixed the SQLite side
@@ -523,4 +524,42 @@ code/test/doc-only change.
 
 This report does not declare its own freeze or acceptance status — that
 verdict belongs to the arbiter's review, consistent with every other scope
-in this engagement.
+in this engagement. See §15 for that verdict, once given.
+
+## 15. Arbiter final verdict — ACCEPTED / CLOSED / FROZEN
+
+Recorded verbatim (translated), not self-declared: the arbiter's review of
+commit `c70ec1e` found the §14 correction closes the write-phase gap
+completely, with every property checked directly against the code rather
+than taken on trust —
+
+```
+Fixture pipeline mechanics:              ACCEPTED
+Validation-phase atomicity:              ACCEPTED
+SQLite batch transaction:                ACCEPTED
+Filesystem publication compensation:     ACCEPTED
+Commit-after-publication ordering:       ACCEPTED
+Failure-injection coverage:              ACCEPTED
+Published CI:                            VERIFIED (run 29469380798, success)
+
+Phase 2C-SMOKE: ACCEPTED / CLOSED / FROZEN
+Frozen scope head: c70ec1e7d5e1606db8462db92b4e11bed947d049
+```
+
+No further correction commits are required for Phase 2C-SMOKE. This is
+the scope's terminal state.
+
+**What freezing this scope does not do**: it does not advance, validate,
+or otherwise touch the canonical Phase 2C research verdict, which this
+scope was never in a position to affect in the first place (§1, §11) —
+the arbiter's own closing line states this explicitly: canonical Phase 2C
+research status remains **AWAITING_HUMAN_REVIEW**, exactly where
+`docs/trials/phase-2c-combined-trial.md` left it. What froze here is
+narrower and purely mechanical: proof that the review export → import →
+finalize pipeline handles a completed review batch correctly and
+recoverably, including under injected mid-write failure — not that any
+opportunity in `runs/phase-2c/` has been reviewed, validated, or moved
+closer to `experiment_ready`. A synthetic fixture batch stayed a synthetic
+fixture batch throughout; verifying the paperwork process rejects bad
+paperwork the same way whether it's fake or real does not make the fake
+paperwork real.

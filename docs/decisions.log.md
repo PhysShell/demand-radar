@@ -667,3 +667,27 @@ prior + 4 new), `ruff check` clean, `ruff format --check` clean, `mypy
 `docs/trials/phase-2c-review-pipeline-smoke.md` §14 for the report-facing
 correction, including a fix to a claim in §13 itself that this round made
 stale (the "commit/rollback stay inside Store" encapsulation choice).
+
+## 2026-07-16 — Phase 2C-SMOKE: ACCEPTED / CLOSED / FROZEN
+
+Arbiter final verdict on commit `c70ec1e` (the second write-phase
+correction, directly above): every checked property — fixture pipeline
+mechanics, validation-phase atomicity, the SQLite batch transaction,
+filesystem publication compensation, commit-after-publication ordering,
+and failure-injection coverage — accepted, published CI (run
+`29469380798`) independently verified success. **Phase 2C-SMOKE is
+closed; no further correction commits are expected for this scope.**
+Frozen scope head: `c70ec1e7d5e1606db8462db92b4e11bed947d049`. Full detail
+recorded verbatim in `docs/trials/phase-2c-review-pipeline-smoke.md` §15.
+
+This freeze is scoped exactly as narrowly as Phase 2C-SMOKE always was
+(§1 of that report, restated by the arbiter's own closing line): it
+proves the review export → import → finalize *pipeline mechanics* are
+correct and recoverable under injected failure, using synthetic fixtures
+that structurally cannot be mistaken for a real review. It does not
+review, validate, or advance a single opportunity in `runs/phase-2c/`.
+Canonical Phase 2C research status is unchanged: **AWAITING_HUMAN_REVIEW**,
+exactly where `docs/trials/phase-2c-combined-trial.md` left it. The next
+action on Phase 2C itself is a real, independent human review of that
+run's 19 opportunities — not automatable, and not something this or any
+prior Phase 2C-SMOKE correction substitutes for.
