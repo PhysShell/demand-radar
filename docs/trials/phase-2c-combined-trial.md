@@ -16,13 +16,18 @@ are true at once here.
    self-report.
 3. **Combined ingest: clean.** 200/200 records accepted into a fresh store,
    0 errors (§3).
-4. **Analyst execution: 196/200 (98%) evidence items classified
-   successfully; 19 real, evidence-linked opportunities produced.** The
-   pipeline's `analyst_status` check nonetheless reads `BLOCKED_TIMEOUT`,
-   not `PASS` — 3 individual classify calls hit the timeout after all
-   retries, 1 produced invalid output, out of 200 real live Claude calls
-   (§4.3). This is an honest, reported gap against the phase spec's
-   "analyst status PASS" pre-review criterion, not a silent one.
+4. **Analyst execution: 193/197 canonical evidence items classified
+   successfully (98.0%); 19 real, evidence-linked opportunities produced
+   from those 193.** 3 of the 200 ingested records were removed by dedup
+   *before* classification — never attempted, not successes — leaving 197
+   classify attempts, of which 4 failed (§4.3). The pipeline's
+   `analyst_status` check nonetheless reads `BLOCKED_TIMEOUT`, not `PASS` —
+   3 individual classify calls hit the timeout after all retries, 1
+   produced invalid output. This is an honest, reported gap against the
+   phase spec's "analyst status PASS" pre-review criterion, not a silent
+   one. The effect of the 4 unclassified records on clustering is
+   **unknown, not "none"**: the opportunity set is valid but not proven
+   complete relative to all 197 canonical records (§4.3).
 5. **Critic: `NOT_RUN` by design.** `--critic human` never calls an agent;
    this is the intended deferral, not a failure (§4.2).
 6. **Run verdict: `BLOCKED`, for two independent reasons** (§4.2, §4.3) —
@@ -145,7 +150,7 @@ verdict. **Zero `FakeRunner` critic errors** — there is no `FakeRunner` in
 this run at all; the critic role is `NeverCalledRunner`, and it was never
 called.
 
-### 4.3 Analyst: 196/200 succeeded; `BLOCKED_TIMEOUT` reported, not hidden
+### 4.3 Analyst: 193/197 succeeded; `BLOCKED_TIMEOUT` reported, not hidden
 
 Of 200 accepted evidence items minus 3 found as exact duplicates during
 dedup (197 went to `classify`), 193 classified successfully and 4 did not:
@@ -178,10 +183,18 @@ A full second live run was considered and deliberately not attempted: at
 ~2.5 hours end to end for 200 real sequential Claude calls, re-running on
 the chance of a cleaner status string — with no guarantee of one, and every
 chance of different individual failures instead — would have been exactly
-the kind of outcome-shopping this engagement has consistently avoided. The
-substantive output (19 evidence-linked opportunities, 100% evidence refs
-valid, correct source-family counts) is unaffected by which 4 of 200 items
-happened to fail.
+the kind of outcome-shopping this engagement has consistently avoided.
+
+**This does not mean the 4 missing classifications had no effect — that is
+unproven, not established.** The run produced 19 valid evidence-linked
+opportunities from the 193 successfully classified canonical records, and
+those 19 cards are exactly what they claim to be: real, schema-valid,
+evidence-linked (`evidence_refs_valid: PASS`). But the 4 unclassified
+canonical records were never clustered at all, and their effect is
+unknown — one could plausibly have joined the existing 23-author
+cross-family cluster (or a different one), shifted an author or
+family count, or seeded an additional cluster. **The opportunity set is
+valid but not proven complete relative to all 197 canonical records.**
 
 ### 4.4 Pre-review acceptance checklist
 
