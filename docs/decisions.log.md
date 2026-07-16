@@ -479,3 +479,63 @@ dataset, out of scope here). This new data branch is a verification
 artifact only: it is not ingested, not analyzed, and is not the trial's
 dataset of record — `docs/trials/github-live-issues-trial.md` continues to
 describe run `29430642497` exactly as originally collected.
+
+## 2026-07-16 — Phase 2C-SMOKE: fixture ≠ review, and a marker that checked purity but not completeness
+
+A separate, explicitly bounded scope from the Phase 2C research work
+itself: prove the review export → import → finalize pipeline's *mechanics*
+work, using a synthetic fixture generator instead of a real human reviewer,
+without ever letting that synthetic pass be mistaken for one. Two design
+decisions worth recording, plus one real bug a test caught.
+
+**A fixture is a different type, not a weaker `ReviewEnvelope`.**
+`schemas/review-fixture-envelope.schema.json` and
+`ReviewFixtureEnvelope`/`ReviewFixtureMetadata` are new, separate
+definitions — `review-envelope.schema.json` itself gained nothing, and
+`fixture.kind`/`fixture.substantive_review_performed` are fixed
+`Literal["test_fixture"]`/`Literal[False]`, so a fixture claiming to be a
+real review cannot even be constructed. Import additionally requires two
+independent gates before accepting one: an explicit `--allow-test-fixture`
+flag *and* the target run's `task.yaml` marked `test_fixture=true`
+(`mark_run_as_test_fixture`) — deliberately redundant, so neither an
+operator's flag alone nor a run's marker alone is enough, and a real
+`ReviewEnvelope` batch needs or looks at neither.
+
+**Real bug, caught by a test, not by inspection: the `TEST_FIXTURE_REVIEW`
+marker's first version checked purity, not completeness.**
+`finalize_run` writes `reviews/review-channel-status.json` only when a
+run's review channel is entirely fixture-sourced. The first implementation
+of that check was `_provenance_source_kinds(run_dir) != {"test_fixture"}:
+return` — correct for "not mixed with human reviews," but that condition
+is *also* satisfied by a **partial** fixture import (one fixture out of
+four opportunities, say): the set of source kinds seen so far is still
+exactly `{"test_fixture"}`, even though most of the run's opportunities
+have no verdict at all yet. `tests/integration/test_review_fixture_smoke.py::test_partial_fixture_set_stays_blocked`
+caught this immediately — the marker file existed after a one-fixture
+import, when it should not have. Fixed by additionally requiring every
+opportunity in the run to have a verdict before writing anything,
+mirroring the exact ALL-semantics fix Phase 2C2 already made to
+`critic_produced_any`/`critic_verdicts_present` for the same reason: purity
+and completeness are different properties, and a partial pass must not
+read as a finished one under either name.
+
+**The smoke run's own `verdict` stayed `BLOCKED` for two independent
+reasons, and neither needed forcing.** The synthetic run's `state.json` was
+copied from the real combined-trial run (`phase-2c-combined-001`), whose
+`analyst_status` already read `BLOCKED_TIMEOUT` (3 classify timeouts out of
+200 real calls, disclosed in `docs/trials/phase-2c-combined-trial.md`
+§4.3). After a complete fixture import, `critic_status` correctly reads
+`PASS` (the channel is complete), but the run's overall verdict is still
+`BLOCKED` because of the inherited analyst gap — exactly the phase spec's
+own preferred outcome shape, and not something this scope had to engineer;
+it fell out of correctly copying prior state and leaving `overall_verdict`
+untouched.
+
+Canonical run (`phase-2c-combined-001`) and its store/run_dir/review packet
+were never opened for writing — `scripts/setup_review_smoke_copy.py`
+produces a separate copy via `shutil.copy2`/`copytree` first, and every
+rewrite after that touches only the copy. SHA-256 of six canonical files
+(DB, `state.json`, `outputs/opportunities.json`, `outputs/report.md`,
+`verification.json`, `packet-manifest.json`) recorded before the scope
+began and re-verified identical afterward — see
+`docs/trials/phase-2c-review-pipeline-smoke.md` §2.
