@@ -23,13 +23,17 @@ public evidence
 - Not a social-listening SaaS. There is no hosting, no multi-tenant mode, no
   UI, no scraper. You bring your own JSONL/RSS exports.
 - Not a new agent platform, and its own pipeline/scoring/storage code is not
-  part of `007`. It *does* now depend on 007 at runtime for the one thing
-  007 does better than a second copy would: `agents/o7_invoke.py`
-  shells out to `o7 invoke` for both `claude` and `codex`, rather than this
-  repo holding its own closed-world CLI-flag logic — see
-  [Subscription-backed runners](#subscription-backed-runners) and
-  [`docs/o7-invoke.md`](docs/o7-invoke.md) for the actual implementation and
-  the cross-repo conformance gate that keeps the two repos honest about it.
+  part of `007`. It *does* depend at runtime on a formal runner contract
+  (`docs/runner-contract.md`) for the one thing a runner does better than a
+  second copy of that logic would: turning `(prompt, schema,
+  capability_profile)` into an `AgentResult`. `--runner o7` — `agents/
+  o7_invoke.py` shelling out to 007's `o7 invoke` for both `claude` and
+  `codex` — is the *default*, not the only legal implementation: any
+  adapter that implements the `AgentRunner` Protocol and passes
+  `tests/contract/test_runner_contract.py` is a legitimate `--runner`. See
+  [Runners](#runners) and [`docs/o7-invoke.md`](docs/o7-invoke.md) for the
+  reference implementation and the cross-repo conformance gate that keeps
+  it and 007 honest about it.
 - Not a market-size or success-probability estimator. The demand score is a
   ranking heuristic — see [`docs/scoring.md`](docs/scoring.md).
 - Not a validator. Nothing in this tool can mark an opportunity
@@ -47,11 +51,14 @@ uv run demand-radar run --product own-audit --since 30d --analyst fake --critic 
 uv run demand-radar report --run <run-id> --format markdown
 ```
 
-Swap `--analyst fake --critic fake` for `--analyst claude --critic codex` once
-`claude`/`codex` are installed and logged in with a subscription, **and** a
-built `o7` binary (sibling `007` repo, `cargo build`) is on `PATH` — see
-[Subscription-backed runners](#subscription-backed-runners). Offline tests
-and the fixture gate never use the real CLIs or require `o7` at all.
+Swap `--analyst fake --critic fake` for `--analyst claude --critic human`
+(deferred human review) once `claude` is installed and logged in with a
+subscription, **and** a built `o7` binary is on `PATH` (sibling `007` repo,
+`cargo build`, or the pinned nix dev shell — see
+[`docs/nix-dev-shell.md`](docs/nix-dev-shell.md)). `--critic codex` is
+currently refused outright — its isolation profile is unverified, see
+[Runners](#runners) and the trust warning below. Offline tests and the
+fixture gate never use the real CLIs or require `o7` at all.
 
 The bare `fake` provider above has no knowledge of the fixture's content —
 it returns an empty object for every call, which correctly fails schema
@@ -84,24 +91,46 @@ on purpose — ingestion reports both without aborting the batch). The
 schema validation runs against — is `EvidenceItem`, per
 [`schemas/evidence-item.schema.json`](schemas/evidence-item.schema.json).
 
-## Subscription-backed runners
+## Runners
 
-Claude Code and Codex CLI are invoked as **local, non-interactive,
-subscription-authenticated CLI adapters**, via 007's `o7 invoke` primitive
-(`007/src/invoke.rs`) — the same closed-world posture `007` uses for
-`o7 judge` (no shell tool, no ambient MCP, schema-constrained output),
-generalized to an arbitrary prompt/schema instead of judge's own hardcoded
-verdict shape. This *is* a real runtime dependency on 007 (a built `o7`
-binary must be on `PATH`), not merely "inspired by" it — `agents/o7_invoke.py`
-shells out to `o7 invoke` and holds no closed-world flag knowledge of its
-own; that all lives in 007 now (`007/src/invoke.rs`, not Python). See
-[`docs/o7-invoke.md`](docs/o7-invoke.md) for what changed and why. No
-Anthropic or OpenAI API key is used or read by either repo; credential
-storage is never touched directly, only the already-authenticated
-`claude`/`codex` CLIs (007's `invoke.rs::strip_provider_api_keys` also
-actively strips any provider API key from the subprocess environment,
-so one present for an unrelated reason can't silently substitute for
-subscription auth).
+`demand-radar run` has two independent axes: **engine**
+(`--analyst`/`--critic`: `fake`/`claude`/`codex` — which model generates or
+critiques a card) and **runner** (`--runner`: `o7`, default — how that
+engine is actually invoked). The pipeline's real dependency is the
+`AgentRunner` contract those runners implement, not any one binary — see
+[`docs/runner-contract.md`](docs/runner-contract.md) for the normative
+Protocol, the status taxonomy, and how a new runner gets added and
+verified. `007` is the default because it is the one implementation this
+project has actually built and exercised against live CLIs, not because
+the contract requires it.
+
+The default `o7` runner invokes Claude Code and Codex CLI as **local,
+non-interactive, subscription-authenticated CLI adapters**, via 007's
+`o7 invoke` primitive (`007/src/invoke.rs`) — the same closed-world posture
+`007` uses for `o7 judge` (no shell tool, no ambient MCP, schema-constrained
+output), generalized to an arbitrary prompt/schema instead of judge's own
+hardcoded verdict shape. This *is* a real runtime dependency on 007 for
+that runner (a built `o7` binary must be on `PATH`), not merely "inspired
+by" it — `agents/o7_invoke.py` shells out to `o7 invoke` and holds no
+closed-world flag knowledge of its own; that all lives in 007 now
+(`007/src/invoke.rs`, not Python). See [`docs/o7-invoke.md`](docs/o7-invoke.md)
+for what changed and why, and [`docs/nix-dev-shell.md`](docs/nix-dev-shell.md)
+for getting a pinned `o7` build via the project's nix dev shell instead of
+a manual `cargo build`.
+
+Using subscription-authenticated CLIs rather than API keys is an
+**operational fact about this reference runner** — it's what the operator
+actually has (CLI subscriptions, no API keys) — not a project-wide
+principle the contract enforces; an API-key-based runner adapter is a
+legitimate future implementation of the same `AgentRunner` Protocol (see
+"Auth-agnosticism" in `docs/runner-contract.md`). What *is* a real,
+specific security property of the `o7` runner, independent of that policy
+question: no Anthropic or OpenAI API key is used or read by either repo for
+it, and credential storage is never touched directly, only the
+already-authenticated `claude`/`codex` CLIs — 007's
+`invoke.rs::strip_provider_api_keys` actively strips any provider API key
+from the subprocess environment, so one present for an unrelated reason
+can't silently substitute for subscription auth.
 
 ## Trust warning
 

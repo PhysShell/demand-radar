@@ -1,5 +1,14 @@
 # `o7 invoke` — the real implementation, and what changed
 
+`o7 invoke`, wrapped by `O7InvokeRunner`, is now the **reference
+implementation** of [`docs/runner-contract.md`](runner-contract.md) — the
+normative `AgentRunner` Protocol any runner adapter must satisfy, not
+something specific to 007. `--runner o7` is that contract's default value,
+not its only legal one. The historical record below — how `o7 invoke` came
+to exist, what it does, and what changed relative to the original proposal
+— is unchanged by that reframing; it describes this one runner, not the
+contract in general.
+
 This is the follow-up to [`docs/o7-bridge-proposal.md`](o7-bridge-proposal.md)
 (kept as the historical record of the original sketch). `o7 invoke` is now
 real: `007/src/invoke.rs`, dispatched from `007/src/main.rs`, with Demand

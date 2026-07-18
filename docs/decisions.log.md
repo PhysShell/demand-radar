@@ -691,3 +691,115 @@ exactly where `docs/trials/phase-2c-combined-trial.md` left it. The next
 action on Phase 2C itself is a real, independent human review of that
 run's 19 opportunities — not automatable, and not something this or any
 prior Phase 2C-SMOKE correction substitutes for.
+
+## 2026-07-18 — Runner contract extraction: 007 stays default, stops being irreplaceable
+
+**Motivation.** Every prior entry in this log treats `o7 invoke` as *the*
+mechanism by which this project calls an LLM — correct as a description of
+what got built, wrong as a description of what the pipeline actually
+needs. The real dependency was always narrower: something that turns
+`(prompt, schema, capability_profile)` into an `AgentResult` honoring the
+status taxonomy and the read-only-data guarantee. `007`'s `o7 invoke` is
+the one implementation of that shape this project has built and verified
+live — it earned default status by being exercised, not by being assumed
+irreplaceable. Making the contract explicit, rather than leaving it
+implicit in `O7InvokeRunner`'s own code, is what lets a future runner
+(direct API calls, a different CLI transport) be added without redesigning
+`cli.py` or the graph nodes that call `AgentRunner.run()`.
+
+**What changed.**
+
+- `AgentRunner` (`agents/base.py`) gains `verified_profiles() ->
+  frozenset[str]` — the set of capability-profile names a runner can
+  *provably* enforce, live-exercised rather than vendor-documented.
+  `O7InvokeRunner` returns `{"read-only-data"}` for `engine="claude"`
+  (`--tools ""` confirmed structural, per `docs/o7-invoke.md`'s live
+  verification) and `frozenset()` for `engine="codex"` (same rationale
+  already on record in `docs/trust-boundaries.md`: codex's tool-removal
+  flags have never been exercised against a real install). `FakeRunner`
+  and `NeverCalledRunner` both return `{"read-only-data"}` — correct, since
+  neither ever gives a model a tool to violate the profile with.
+- `cli.py::run`'s refusal logic is now generic: a requested
+  `capability_profile` not present in the chosen runner's
+  `verified_profiles()` is refused before any subprocess spawns. This
+  **replaces** the old hardcoded `if "codex" in (analyst, critic): refuse`
+  check with a rule that produces the identical outcome for today's
+  runner/engine pairs but generalizes to any future runner or engine
+  without a new special case per combination.
+- `demand-radar run` gains a `--runner` option (default `o7`), separating
+  *engine* (`--analyst`/`--critic`: which model) from *runner* (how it's
+  invoked). `cli.py::RUNNER_FACTORIES` is a registry from `--runner` name
+  to a constructor — adding a runner means adding a registry entry, not
+  branching inside `run`.
+- `O7InvokeRunner` now probes `o7 --version` lazily on its first `run()`
+  call (not at construction — instantiating a runner stays side-effect
+  free) and requires the `0.1.x` line (`o7 0.1.0` output shape). A mismatch
+  returns `status="BLOCKED_NOT_INSTALLED"`, `error_kind=
+  "o7_version_unsupported"` — "wrong version" and "not installed" are the
+  same actionable fact from a caller's perspective (this runner cannot be
+  used here), so it is not a new status.
+- New `tests/contract/test_runner_contract.py`: a generic suite every
+  runner adapter, present or future, must pass (status/field consistency,
+  `prompt_hash`/`input_hashes` independent recomputability, `task_id`
+  stability across retries, `run_dir` containment, unrecognized-profile
+  refusal). `scripts/o7_conformance_gate.py` is unchanged in purpose — it
+  remains the additional, `o7`-specific cross-check against the real
+  binary, not replaced by the new generic suite.
+- New normative doc: [`docs/runner-contract.md`](runner-contract.md).
+  `README.md`'s former "Subscription-backed runners" section is now
+  "Runners", describing the engine/runner split and linking to it;
+  `docs/o7-invoke.md` gained a short pointer at its top naming `o7 invoke`
+  as this contract's reference implementation without altering its
+  historical record.
+- A nix flake input pinning the sibling `007` repo was added
+  (`flake.nix`), documented in `docs/nix-dev-shell.md`. **Not
+  build-validated in this authoring environment — no `nix` installed
+  here**, so the flake's correctness rests on review, not on a real
+  `nix develop`/`nix build` run. Flag this the same way `sandboy`'s
+  unverified build was flagged in the 2026-07-15 entry above: a real
+  gap, not glossed over, and worth re-checking on a machine that has nix.
+
+**What deliberately did NOT change.**
+
+- The codex refusal survives, in effect: `--analyst codex`/`--critic
+  codex` is still refused for Zone 2 (`read-only-data` is not in
+  `O7InvokeRunner`'s `verified_profiles()` for that engine) — the
+  mechanism generalized, the outcome for today's only real runner did not.
+  `demand-radar smoke-agents` is unaffected for the same reason it always
+  was: it constructs a runner directly and sends no evidence content.
+- `o7` remains the default `--runner`, and no existing invocation's
+  behavior changes: `--runner` defaults to `o7`, so every command in this
+  log and in `README.md`'s Quick start that predates this entry still does
+  exactly what it did before. This is a contract extraction, not a
+  behavior change.
+- `007` is not being demoted or deprecated — it is still the only runner
+  this project has actually built, and remains the one referenced
+  throughout `docs/o7-invoke.md` and `docs/trust-boundaries.md`. What
+  changed is that its position is now documented as "default and
+  reference implementation of a contract" rather than implied as "the
+  only possible mechanism."
+- **Auth-policy clarification, on record for the first time explicitly
+  (implicit in every prior entry above):** "subscription auth only, no
+  API keys" was never a principle this project's design enforces — it is
+  an operational fact about the reference `o7` runner's operator (CLI
+  subscriptions on hand, no API keys). The contract itself
+  (`docs/runner-contract.md`) is auth-agnostic; a future API-key-based
+  runner adapter is a legitimate implementation of the same
+  `AgentRunner` Protocol. 007's `invoke.rs::strip_provider_api_keys`
+  remains a real, specific security property **of that runner** (an
+  ambient key can't silently substitute for the subscription auth it's
+  meant to be exercising) — not evidence of a project-wide prohibition on
+  API-key auth. Reason for calling this out now rather than leaving it
+  implicit: several earlier entries and `docs/trust-boundaries.md` read,
+  on a literal pass, as if "no API keys" were a security requirement of
+  the pipeline itself; it was always a requirement of the one runner that
+  happened to exist, and the distinction only matters once a second
+  runner is a real possibility rather than a hypothetical.
+
+**Verification.** Documentation-only in this pass; the code and test
+changes described above land in the same commit series but are reviewed
+and verified separately (offline gate, contract suite, and — where a real
+`o7`/`codex`/`claude` install is available — `scripts/o7_conformance_gate.py`
+and `demand-radar smoke-agents`, per the existing verification pattern
+this log already uses throughout). No `runs/` artifact and no prior log
+entry's recorded result is altered by this entry.
