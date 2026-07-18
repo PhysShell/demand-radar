@@ -10,6 +10,12 @@ Requires a real `o7` binary on PATH (or $O7_BINARY) built from the sibling
 exercises whatever real `claude`/`codex` CLIs are actually available in the
 current environment (honestly reporting BLOCKED_NOT_INSTALLED for any that
 aren't, exactly like `demand-radar smoke-agents`).
+
+The generic, implementation-agnostic contract every `AgentRunner` (present
+or future) must satisfy now lives in tests/contract/test_runner_contract.py
+and runs fully offline as part of the normal gate; this script remains the
+live cross-repo gate proving the `o7` REFERENCE implementation agrees with
+`o7 invoke` called directly.
 """
 
 from __future__ import annotations

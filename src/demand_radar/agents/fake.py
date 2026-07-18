@@ -69,6 +69,12 @@ class FakeRunner:
         started_at = datetime.now(UTC)
         stdout_path = run_dir / "stdout.jsonl"
         stderr_path = run_dir / "stderr.log"
+        # Written empty up front so stderr_path always names a real file for
+        # every scenario branch (the contract's stdout/stderr promise: a
+        # debugging record that exists, never a dangling path -- the gap
+        # tests/contract/test_runner_contract.py originally caught here).
+        # Failure branches below overwrite it with their specific message.
+        stderr_path.write_text("")
         prompt_hash = sha256_text(prompt)
         input_hashes = hash_input_paths(input_paths)
         scenario = self.scenarios.get(task_id, self.default)
