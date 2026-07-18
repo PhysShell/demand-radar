@@ -1,0 +1,60 @@
+{
+  "schema": "demand-radar.opportunity-card/1",
+  "id": "opp_ccef237e54de",
+  "product": "own-audit",
+  "cluster_ids": [
+    "cluster_ccef237e54de"
+  ],
+  "problem": {
+    "statement": "Legacy WinForms/.NET code that uses WeakReference to avoid event-subscription memory leaks can still resolve and invoke methods on a disposed IDisposable target during the gap before GC runs, causing unexpected behavior with no built-in way to check disposal state."
+  },
+  "persona": {
+    "primary": "legacy .NET/WinForms maintainer"
+  },
+  "context": {
+    "situation": "A maintainer of a legacy WinForms app has a controller that tracks UI controls via WeakReference (to avoid an earlier memory leak from event subscriptions), but disposed controls can still be resolved and called against before garbage collection removes them."
+  },
+  "evidence": {
+    "evidence_ids": [
+      "ev_9a7a25eadd9a48ba"
+    ],
+    "unique_authors": 1,
+    "source_families": 1
+  },
+  "signals": {
+    "demand_score": 3.0,
+    "confidence": 0.4633
+  },
+  "current_workarounds": [
+    "Switched controls from subscribing to controller events to being tracked via WeakReference, to avoid the original memory leak (this workaround introduced the new disposed-object race)"
+  ],
+  "existing_substitutes": [],
+  "possible_wedges": [
+    {
+      "type": "plugin",
+      "offer": "Roslyn/IDE analyzer that flags WeakReference<T> usages where T : IDisposable and warns about the disposed-but-not-yet-collected race, as part of a legacy-code audit rule set."
+    },
+    {
+      "type": "cli",
+      "offer": "Audit CLI (OwnAudit) that scans a .NET/WPF/WinForms solution for WeakReference<IDisposable> patterns and reports the disposed-before-GC risk in an audit findings report."
+    }
+  ],
+  "risks": [
+    "Single evidence item (n=1); unclear if this recurs across other legacy .NET codebases",
+    "Commercial intent signal is near zero (0.05) and commitment is 0 -- reads as a one-off technical question, not a purchase signal",
+    "No named substitute tools mentioned, so unclear whether existing static analyzers already cover this",
+    "Pain/urgency are moderate-low, suggesting an occasional annoyance rather than a recurring blocker worth paying to fix"
+  ],
+  "cheapest_experiment": {
+    "hypothesis": "Legacy .NET/WinForms maintainers using WeakReference to avoid event-leak patterns would value a static-analysis check that flags disposed-but-not-yet-collected WeakReference<IDisposable> usage.",
+    "input": "Reply on the original thread and similar legacy .NET/WinForms forum threads offering a free one-off manual scan of their codebase for this WeakReference<IDisposable> pattern.",
+    "output": "Number of maintainers who respond asking for the scan or share a code snippet/repo for review.",
+    "commitment_event": "A maintainer sends actual code for review or asks to be notified when an audit tool for this pattern is available.",
+    "success_threshold": "3+ maintainers request the scan or ask to be notified across multiple threads/communities.",
+    "failure_threshold": "0-1 requests after posting across several relevant legacy .NET communities."
+  },
+  "status": "investigate",
+  "rejection_reasons": [
+    "critic review not completed"
+  ]
+}

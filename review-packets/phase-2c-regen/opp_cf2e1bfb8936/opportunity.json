@@ -1,0 +1,65 @@
+{
+  "schema": "demand-radar.opportunity-card/1",
+  "id": "opp_cf2e1bfb8936",
+  "product": "own-audit",
+  "cluster_ids": [
+    "cluster_cf2e1bfb8936"
+  ],
+  "problem": {
+    "statement": "WPF developers lack a reliable way to determine whether binding UI elements to struct properties (which WPF boxes on each access) creates strong references that leak memory over time."
+  },
+  "persona": {
+    "primary": "WPF/.NET developer maintaining legacy desktop applications"
+  },
+  "context": {
+    "situation": "A developer binding a UI element to a nested property of an immutable struct on an INotifyPropertyChanged class is unsure whether WPF's struct-boxing behavior causes a memory leak."
+  },
+  "evidence": {
+    "evidence_ids": [
+      "ev_6fbba25154fcfac5"
+    ],
+    "unique_authors": 1,
+    "source_families": 1
+  },
+  "signals": {
+    "demand_score": 4.65,
+    "confidence": 0.5083
+  },
+  "current_workarounds": [
+    "Binding directly to the struct property itself (e.g. {Binding Demo}) instead of a nested property (e.g. {Binding Demo.Value}) to avoid WPF attaching event handlers"
+  ],
+  "existing_substitutes": [],
+  "possible_wedges": [
+    {
+      "type": "desktop_tool",
+      "offer": "A memory-leak analyzer/profiler for legacy WPF apps that flags binding expressions likely to leak via struct boxing."
+    },
+    {
+      "type": "cli",
+      "offer": "A static-analysis CLI that scans XAML/code-behind for struct-typed binding paths and reports leak risk with suggested fixes."
+    },
+    {
+      "type": "plugin",
+      "offer": "A Visual Studio/Roslyn analyzer extension that warns inline when a XAML binding targets a nested struct property."
+    }
+  ],
+  "risks": [
+    "Single evidence item (one Stack Overflow-style question) - no corroborating reports of actual leaks or business impact",
+    "No named competing tools or products in the evidence, so market awareness/demand is unverified",
+    "Unclear willingness to pay - question shows technical curiosity, not commercial intent or urgency (low pain/urgency/commercial_intent signals)",
+    "Question may be adequately answered by community discussion alone, reducing need for a dedicated tool",
+    "Narrow niche: only applies to WPF apps binding to struct properties on INotifyPropertyChanged classes"
+  ],
+  "cheapest_experiment": {
+    "hypothesis": "WPF developers maintaining legacy apps would try a free lightweight checker that flags XAML bindings to struct properties as potential leak risks.",
+    "input": "A short blog post or forum reply (SO, r/csharp, WPF Discord) answering the struct-boxing leak question, offering a free script/checklist in exchange for email signup.",
+    "output": "Number of email signups or tool downloads from the post over 2 weeks.",
+    "commitment_event": "Developer submits email to receive the checker script or clicks through to download it.",
+    "success_threshold": "15+ signups/downloads from a single post, or unsolicited follow-up questions asking for a deeper tool.",
+    "failure_threshold": "Fewer than 5 signups/downloads despite reasonable post visibility (upvotes/views)."
+  },
+  "status": "investigate",
+  "rejection_reasons": [
+    "critic review not completed"
+  ]
+}

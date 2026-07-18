@@ -1,0 +1,67 @@
+{
+  "schema": "demand-radar.opportunity-card/1",
+  "id": "opp_f646b47433da",
+  "product": "own-audit",
+  "cluster_ids": [
+    "cluster_f646b47433da"
+  ],
+  "problem": {
+    "statement": "WPF developers can't identify what's retaining memory after switching between views/controls, because standard cleanup steps (nulling data sources, forcing GC) don't reveal or fix leaks caused by hidden references (event handlers, static refs, visual tree retention) inside third-party or custom controls."
+  },
+  "persona": {
+    "primary": "WPF/.NET developer maintaining a desktop app with custom/third-party UI controls"
+  },
+  "context": {
+    "situation": "A developer building a multi-view WPF app (matrix grid plus canvas graph) sees rendering slow down and memory climb after switching views, and basic cleanup (nulling ItemsSource, GC.Collect) does not fix it."
+  },
+  "evidence": {
+    "evidence_ids": [
+      "ev_3fba4ef022fa2db5"
+    ],
+    "unique_authors": 1,
+    "source_families": 1
+  },
+  "signals": {
+    "demand_score": 4.775,
+    "confidence": 0.4633
+  },
+  "current_workarounds": [
+    "Setting the control's ItemsSource to null on view-switch/visibility toggle",
+    "Manually forcing GC.Collect() after hiding the view"
+  ],
+  "existing_substitutes": [
+    "DataGrid2DLibrary (third-party WPF control involved in the leak, not a leak-diagnosis tool)"
+  ],
+  "possible_wedges": [
+    {
+      "type": "desktop_tool",
+      "offer": "Standalone WPF memory-leak auditor that attaches to a running app and flags what's retaining objects after a view/control switch (event handlers, static refs, dangling bindings)."
+    },
+    {
+      "type": "cli",
+      "offer": "Static analysis CLI that scans WPF XAML/code-behind for known leak-prone patterns (unremoved event subscriptions, ItemsSource bindings not cleared, VisualTree retention) as part of CI/dev workflow."
+    },
+    {
+      "type": "plugin",
+      "offer": "Visual Studio extension that highlights leak-prone binding/event-handler patterns inline while editing XAML/code-behind."
+    }
+  ],
+  "risks": [
+    "Single evidence item (one forum post) — no confirmation this is a widespread, recurring pattern rather than a one-off bug.",
+    "Zero commercial-intent signal and low urgency/commitment scores in the evidence; the poster wants free troubleshooting help, not a tool to buy.",
+    "The specific leak is tied to one obscure third-party control (DataGrid2DLibrary); unclear how well it generalizes to other WPF/audit-tooling contexts.",
+    "No mention of budget, team size, or willingness to pay anywhere in the evidence."
+  ],
+  "cheapest_experiment": {
+    "hypothesis": "WPF developers hunting UI-switch memory leaks in third-party-control-heavy apps would use a free leak-pattern checklist/analyzer instead of manual GC.Collect() guesswork.",
+    "input": "Post a 'WPF memory leak checklist' (event handler leaks, static refs, uncleared bindings) with a free code-snippet review offer on WPF/StackOverflow-adjacent forums and relevant threads.",
+    "output": "Number of developers who submit a XAML/code-behind snippet or email for review.",
+    "commitment_event": "Developer pastes their code or gives their email for a free leak review.",
+    "success_threshold": "10+ snippet/email submissions within 2 weeks across 3-5 forum posts.",
+    "failure_threshold": "Fewer than 3 submissions after 2 weeks despite posts getting views/replies."
+  },
+  "status": "investigate",
+  "rejection_reasons": [
+    "critic review not completed"
+  ]
+}

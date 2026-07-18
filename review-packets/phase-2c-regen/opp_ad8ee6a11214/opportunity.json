@@ -1,0 +1,68 @@
+{
+  "schema": "demand-radar.opportunity-card/1",
+  "id": "opp_ad8ee6a11214",
+  "product": "own-audit",
+  "cluster_ids": [
+    "cluster_ad8ee6a11214"
+  ],
+  "problem": {
+    "statement": "WPF's binding engine silently falls back to a PropertyDescriptor.AddValueChanged listener when binding to properties that don't implement INotifyPropertyChanged, and these listeners are never released, causing long-lived binding memory leaks."
+  },
+  "persona": {
+    "primary": "WPF developer diagnosing memory leaks in a legacy WPF/.NET application"
+  },
+  "context": {
+    "situation": "A WPF developer profiling their application's memory usage discovered that bindings to properties on immutable/non-INPC models silently create leaking PropertyDescriptor listeners, a framework behavior that has existed for years and is undocumented to most developers."
+  },
+  "evidence": {
+    "evidence_ids": [
+      "ev_b261f5525c151234"
+    ],
+    "unique_authors": 1,
+    "source_families": 1
+  },
+  "signals": {
+    "demand_score": 4.525,
+    "confidence": 0.5233
+  },
+  "current_workarounds": [
+    "Implementing INotifyPropertyChanged on every bound model/property to avoid triggering the PropertyDescriptor fallback path (implied by the poster's stated goal of avoiding this requirement)"
+  ],
+  "existing_substitutes": [
+    "Snoop (WPF visual tree/binding debugger, used to detect the leak)",
+    "dotMemory (JetBrains .NET memory profiler, used to diagnose the leak per referenced blog post)"
+  ],
+  "possible_wedges": [
+    {
+      "type": "cli",
+      "offer": "A static analyzer/CLI that scans XAML + code-behind for Binding/PropertyPath usages targeting non-INotifyPropertyChanged properties and flags them as likely PropertyDescriptor leak risks."
+    },
+    {
+      "type": "plugin",
+      "offer": "A Visual Studio/Roslyn analyzer that lints WPF bindings at build time and warns when a bound property lacks INPC and will trigger the leaking fallback."
+    },
+    {
+      "type": "desktop_tool",
+      "offer": "A Snoop-style runtime inspector focused specifically on surfacing active PropertyDescriptor.AddValueChanged listeners and their retaining objects for legacy WPF apps."
+    }
+  ],
+  "risks": [
+    "Single evidence item (n=1); no corroborating reports of prevalence or severity across other teams",
+    "Evidence is a framework bug-fix proposal on GitHub, not a product inquiry — near-zero commercial intent signal (0.05) and zero commitment signal",
+    "No workarounds or willingness-to-pay evidence beyond the poster's own suggested framework-level fix",
+    "Poster's own preferred solution is a free upstream WPF engine fix, which could obsolete any paid tooling wedge",
+    "WPF/legacy .NET is a shrinking, niche developer population, limiting addressable market size"
+  ],
+  "cheapest_experiment": {
+    "hypothesis": "WPF developers maintaining legacy codebases would engage with a free, lightweight scanner that flags bindings likely to trigger the PropertyDescriptor leak, indicating demand for a fuller audit tool.",
+    "input": "A short blog post/landing page (or GitHub gist) offering a free static-analysis script that scans XAML files for bindings to non-INotifyPropertyChanged properties, shared in the same WPF GitHub issue thread and relevant WPF/.NET forums.",
+    "output": "Count of signups, repo stars/forks, downloads, or inbound comments/questions requesting more capability.",
+    "commitment_event": "Visitor provides an email address or stars/forks the repo to access the scanner.",
+    "success_threshold": "15+ signups or stars within 2 weeks from WPF-specific channels.",
+    "failure_threshold": "Fewer than 5 signups/stars and no unprompted follow-up questions after 2 weeks."
+  },
+  "status": "investigate",
+  "rejection_reasons": [
+    "critic review not completed"
+  ]
+}

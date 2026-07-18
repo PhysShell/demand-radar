@@ -1,0 +1,66 @@
+{
+  "schema": "demand-radar.opportunity-card/1",
+  "id": "opp_d658818dd3a7",
+  "product": "own-audit",
+  "cluster_ids": [
+    "cluster_d658818dd3a7"
+  ],
+  "problem": {
+    "statement": "Developers maintaining legacy .NET apps cannot determine the correct ownership/disposal pattern for linked CancellationTokenSource objects, since disposing one CTS silently releases resources tied to a linked CTS in ways that contradict their mental model and official docs."
+  },
+  "persona": {
+    "primary": "legacy .NET maintainer debugging a production memory leak"
+  },
+  "context": {
+    "situation": "A maintainer of an older .NET console app found a memory leak rooted in undisposed CancellationTokenSource objects and is trying to work out the real disposal/ownership semantics of linked CTS instances before fixing it."
+  },
+  "evidence": {
+    "evidence_ids": [
+      "ev_c233eb5edcdf7ad2"
+    ],
+    "unique_authors": 1,
+    "source_families": 1
+  },
+  "signals": {
+    "demand_score": 4.75,
+    "confidence": 0.4483
+  },
+  "current_workarounds": [
+    "Manually analyzed heap/memory dumps to root retained CancellationTokenSource objects",
+    "Built a standalone test harness (dotnetfiddle) comparing different dispose orderings across CTS/linked-CTS to infer actual behavior"
+  ],
+  "existing_substitutes": [],
+  "possible_wedges": [
+    {
+      "type": "cli",
+      "offer": "A Roslyn-based analyzer/CLI that scans a legacy .NET codebase for CancellationTokenSource and linked-CTS usage and flags ambiguous disposal ownership or missing Dispose calls."
+    },
+    {
+      "type": "concierge_service",
+      "offer": "Submit a code snippet or repo link and get a manual audit report identifying CTS/linked-CTS disposal ownership issues and leak risks."
+    },
+    {
+      "type": "desktop_tool",
+      "offer": "A WPF-based memory-dump viewer add-on that highlights retained CancellationTokenSource chains and traces them back to the owning/linking code path."
+    }
+  ],
+  "risks": [
+    "Single evidence item (n=1) from a Stack Overflow-style question, not a validated recurring pattern",
+    "Commercial intent and commitment signals are near zero (0.05 and 0.0) — this reads as a curiosity/learning question, not a purchase-driven need",
+    "The underlying confusion may be fully resolved by a good answer/blog post rather than requiring any tool",
+    "No named competing tools or substitutes appear in the evidence, so market awareness and willingness to pay are unknown",
+    "Only one persona type (backend/console app maintainer) is represented; unclear if WPF/audit-tooling users share this exact pain"
+  ],
+  "cheapest_experiment": {
+    "hypothesis": "Legacy .NET maintainers debugging CancellationTokenSource-related memory leaks would engage with a free audit offer that explains and flags linked-CTS disposal ownership issues in their own code.",
+    "input": "A short technical post/landing page (e.g. answering the 'why does disposing a CTS release a linked CTS' question) with a call-to-action to submit a code snippet or repo link for a free disposal-ownership check.",
+    "output": "Landing page plus a simple submission form for code snippets/repo links.",
+    "commitment_event": "A visitor submits their own code (snippet or repo link) for the free audit check.",
+    "success_threshold": "5+ distinct code submissions within a few weeks of publishing, suggesting this is a recurring pain worth building tooling for.",
+    "failure_threshold": "0-1 submissions after reasonable traffic, suggesting this is an isolated curiosity rather than a broad audit-tooling opportunity."
+  },
+  "status": "investigate",
+  "rejection_reasons": [
+    "critic review not completed"
+  ]
+}

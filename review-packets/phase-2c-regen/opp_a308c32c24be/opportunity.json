@@ -1,0 +1,63 @@
+{
+  "schema": "demand-radar.opportunity-card/1",
+  "id": "opp_a308c32c24be",
+  "product": "own-audit",
+  "cluster_ids": [
+    "cluster_a308c32c24be"
+  ],
+  "problem": {
+    "statement": "Standard .NET multicast delegate events store subscribers in a list, so unsubscribing (-=) is O(n); at large subscriber counts (hundreds of thousands to millions) this makes dispose-time unsubscription a severe CPU/latency bottleneck."
+  },
+  "persona": {
+    "primary": "WPF/.NET developer with large dynamic subscriber counts on shared events"
+  },
+  "context": {
+    "situation": "A .NET/WPF app has a shared value that up to millions of dynamically created components subscribe to and unsubscribe from (on dispose) via standard events, and stress testing reveals unsubscribe alone consumes >90% CPU for seconds at a time."
+  },
+  "evidence": {
+    "evidence_ids": [
+      "ev_a29b9d08c5d8a56d"
+    ],
+    "unique_authors": 1,
+    "source_families": 1
+  },
+  "signals": {
+    "demand_score": 3.85,
+    "confidence": 0.4483
+  },
+  "current_workarounds": [
+    "Considering switching to weak event handlers so components don't need to explicitly unsubscribe at all"
+  ],
+  "existing_substitutes": [
+    "WeakEventManager / weak event pattern (considered, not confirmed adopted)"
+  ],
+  "possible_wedges": [
+    {
+      "type": "plugin",
+      "offer": "Roslyn/VS analyzer that flags event subscribe/unsubscribe patterns likely to hit O(n) scaling at high subscriber counts and suggests scalable alternatives (weak events, indexed dispatch)"
+    },
+    {
+      "type": "cli",
+      "offer": "Static scan of a legacy .NET/WPF codebase for large-fan-out event usage patterns as part of an audit report"
+    }
+  ],
+  "risks": [
+    "Single evidence item (n=1); no confirmation this is a widespread pattern beyond one Stack Overflow question",
+    "No explicit willingness to pay or mention of budget/tooling spend",
+    "Not clear the poster's scenario (millions of subscribers) is common in typical WPF/.NET audit targets vs. an edge case",
+    "No mention of OwnAudit or audit tooling specifically in the evidence -- link to the audit-tool wedge is an inference, not stated",
+    "Workaround (weak events) is only proposed/considered, not validated as adopted or effective"
+  ],
+  "cheapest_experiment": {
+    "hypothesis": ".NET/WPF developers who hit O(n) event-unsubscribe slowdowns at large subscriber counts would engage with (and want a tool to catch) this anti-pattern before it becomes a stress-test crisis.",
+    "input": "A short technical post/analyzer-rule writeup describing the 'event unsubscribe is O(n) over subscriber list' anti-pattern, shared on r/dotnet, Stack Overflow, and .NET blogs, linking to a one-page signup/waitlist describing an audit-tool check for it.",
+    "output": "Number of waitlist signups or reply comments describing their own large-subscriber-count event performance pain.",
+    "commitment_event": "A developer submits their email to the waitlist or replies describing a matching real-world incident.",
+    "success_threshold": "15+ relevant signups/replies within 2 weeks",
+    "failure_threshold": "Fewer than 5 relevant signups/replies after 2 weeks despite 1000+ views"
+  },
+  "status": "investigate",
+  "rejection_reasons": [
+    "critic review not completed"
+  ]
+}

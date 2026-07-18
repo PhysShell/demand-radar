@@ -1,0 +1,28 @@
+{
+  "schema": "demand-radar.review-envelope/1",
+  "run_id": "phase-2c-regen-001",
+  "opportunity_id": "opp_6a0c518f1701",
+  "reviewer": {
+    "kind": "human",
+    "id": "",
+    "conflict": ""
+  },
+  "reviewed_at": "",
+  "opportunity_hash": "sha256:f67b6dc58fb5b9cd2379ea7d3da71d5895418607570ce7602750fe2574cce697",
+  "evidence_manifest_hash": "sha256:a9b7a9307f9e90c64863f43641b778b1238b4734e545a8013285f7d964d47ad5",
+  "attestation": {
+    "reviewed_primary_evidence": false,
+    "review_not_generated_by_analyst_provider": false
+  },
+  "verdict": {
+    "schema": "demand-radar.critic-verdict/1",
+    "opportunity_id": "opp_6a0c518f1701",
+    "recommended_status": "investigate",
+    "objections": [],
+    "overclaim_check": {
+      "overclaims": false,
+      "statement": ""
+    },
+    "notes": ""
+  }
+}

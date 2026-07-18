@@ -1,0 +1,62 @@
+{
+  "schema": "demand-radar.opportunity-card/1",
+  "id": "opp_7e7762f1c677",
+  "product": "own-audit",
+  "cluster_ids": [
+    "cluster_7e7762f1c677"
+  ],
+  "problem": {
+    "statement": "GPU-driver-specific memory leaks in WPF's hardware-accelerated rendering pipeline (e.g. on Nvidia Quadro cards) force developers to choose between disabling hardware acceleration entirely or shipping an app that leaks memory on affected hardware."
+  },
+  "persona": {
+    "primary": "WPF developer building graphics/drawing-heavy desktop applications"
+  },
+  "context": {
+    "situation": "A developer drawing custom patterns in WPF on a high-resolution monitor traced a memory leak to specific Nvidia Quadro GPU drivers, confirming it did not reproduce on GeForce or AMD hardware."
+  },
+  "evidence": {
+    "evidence_ids": [
+      "ev_6d9d6a0a7ee0e91d"
+    ],
+    "unique_authors": 1,
+    "source_families": 1
+  },
+  "signals": {
+    "demand_score": 4.8500000000000005,
+    "confidence": 0.4633
+  },
+  "current_workarounds": [
+    "Setting RenderOptions.ProcessRenderMode to SoftwareOnly to disable hardware acceleration and avoid the leak, at the cost of rendering performance elsewhere in the app"
+  ],
+  "existing_substitutes": [
+    "SkiaSharp (rendering library in use when the leak was observed, tested across versions 2.88.9 and 3.116.0)"
+  ],
+  "possible_wedges": [
+    {
+      "type": "desktop_tool",
+      "offer": "A standalone WPF render diagnostics tool that runs an app under different GPU/driver profiles and flags known driver-specific leak patterns before release."
+    },
+    {
+      "type": "cli",
+      "offer": "A CLI audit check that inspects a WPF app's render mode settings and GPU driver environment, warning when hardware acceleration is likely to trigger known leak signatures on specific driver families."
+    }
+  ],
+  "risks": [
+    "Only a single evidence item (one GitHub bug report), no corroborating reports of this exact driver/leak combination",
+    "Commercial intent and commitment signals in the evidence are very low (0.1 each), suggesting this is a bug report, not a purchase intent signal",
+    "Unclear how many WPF shops specifically target Quadro-class workstation GPUs versus consumer hardware, limiting addressable market",
+    "No indication the reporter or others would pay for tooling versus wanting a free upstream fix in SkiaSharp/WPF itself"
+  ],
+  "cheapest_experiment": {
+    "hypothesis": "WPF developers hitting GPU-driver-specific rendering leaks would want an automated audit that flags the risk before shipping, rather than manually bisecting drivers like this reporter did.",
+    "input": "Reply to this and similar SkiaSharp/WPF GitHub issues offering a free one-page 'GPU render leak checklist' plus a link to sign up for early access to an automated audit check.",
+    "output": "Number of sign-ups or replies expressing interest from developers who hit the same class of driver-specific leak.",
+    "commitment_event": "Developer provides email or app details to be notified when the audit check is available.",
+    "success_threshold": "5+ developers across distinct threads/projects sign up or ask for the tool within 2 weeks",
+    "failure_threshold": "Fewer than 2 sign-ups after posting in 3+ relevant issue threads, or responses indicating the community expects this to be fixed upstream for free"
+  },
+  "status": "investigate",
+  "rejection_reasons": [
+    "critic review not completed"
+  ]
+}

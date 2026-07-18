@@ -1,0 +1,63 @@
+{
+  "schema": "demand-radar.opportunity-card/1",
+  "id": "opp_c2ea987c6c33",
+  "product": "own-audit",
+  "cluster_ids": [
+    "cluster_c2ea987c6c33"
+  ],
+  "problem": {
+    "statement": "WPF TextBlocks that bind a changing Text property to a StaticResource FontFamily leak unmanaged UnmanagedMemoryStream font allocations on every text change, growing memory without bound in long-running apps."
+  },
+  "persona": {
+    "primary": "WPF/.NET developer maintaining a long-running desktop application"
+  },
+  "context": {
+    "situation": "A .NET 7 WPF developer instrumented their app, found font-backed UnmanagedMemoryStream objects were never disposed on repeated Text updates, and filed a public bug report with a repro but no known fix."
+  },
+  "evidence": {
+    "evidence_ids": [
+      "ev_d87d392b49b976b6"
+    ],
+    "unique_authors": 1,
+    "source_families": 1
+  },
+  "signals": {
+    "demand_score": 5.3,
+    "confidence": 0.5083
+  },
+  "current_workarounds": [],
+  "existing_substitutes": [],
+  "possible_wedges": [
+    {
+      "type": "cli",
+      "offer": "Static analyzer that scans WPF XAML/codebehind for FontFamily+bound-Text patterns known to leak unmanaged font memory, as part of a legacy-app audit report."
+    },
+    {
+      "type": "desktop_tool",
+      "offer": "Runtime memory diagnostic that attaches to a running WPF app and flags undisposed UnmanagedMemoryStream/font allocations growing over time."
+    },
+    {
+      "type": "concierge_service",
+      "offer": "Manual legacy WPF codebase audit that checks for this and similar unmanaged-resource leak patterns as a paid one-off engagement."
+    }
+  ],
+  "risks": [
+    "Single evidence source: one GitHub issue, no corroborating reports",
+    "No workarounds or commercial-intent signals present (commercial_intent scored only 0.1)",
+    "Unclear how widespread the pattern (StaticResource FontFamily + bound Text) is in real production apps vs. this one repro",
+    "Microsoft could patch this in a future .NET/WPF runtime release, making third-party detection tooling short-lived",
+    "No indication anyone would pay for detection vs. just reporting/upvoting the bug"
+  ],
+  "cheapest_experiment": {
+    "hypothesis": "WPF developers maintaining long-running desktop apps will engage with a free diagnostic checklist/script for this leak pattern, signaling latent demand for audit tooling.",
+    "input": "A short writeup with the repro pattern and a free memory-leak detection script, posted to WPF/.NET developer communities (e.g. r/dotnet, WPF Discord, relevant GitHub issue threads).",
+    "output": "Downloads/comments on the script plus replies confirming they hit this issue in their own app.",
+    "commitment_event": "A developer asks to be notified when a full audit tool is available or requests a paid codebase scan.",
+    "success_threshold": "10+ meaningful replies or script downloads with at least 2 requests for a paid/early-access audit within 2 weeks",
+    "failure_threshold": "Fewer than 3 replies or no requests for further tooling after 2 weeks"
+  },
+  "status": "investigate",
+  "rejection_reasons": [
+    "critic review not completed"
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "schema": "demand-radar.opportunity-card/1",
+  "id": "opp_caeaccf16eea",
+  "product": "own-audit",
+  "cluster_ids": [
+    "cluster_caeaccf16eea"
+  ],
+  "problem": {
+    "statement": "WPF Frame navigation keeps old Page instances rooted in memory (commonly via unremoved event handlers or the navigation journal cache), so repeated Navigate() calls cause unbounded memory growth that manual GC and KeepAlive=\"False\" don't fix."
+  },
+  "persona": {
+    "primary": "WPF developer maintaining a Frame-based navigation UI"
+  },
+  "context": {
+    "situation": "A developer navigating between pages in a WPF Frame notices memory climbing with every navigation and can't get standard fixes to release the old pages."
+  },
+  "evidence": {
+    "evidence_ids": [
+      "ev_e737f38f2e6f5b9f"
+    ],
+    "unique_authors": 1,
+    "source_families": 1
+  },
+  "signals": {
+    "demand_score": 5.15,
+    "confidence": 0.5083
+  },
+  "current_workarounds": [
+    "Manually calling garbage collection (GC.Collect)",
+    "Setting page KeepAlive=\"False\" on the Frame/Page"
+  ],
+  "existing_substitutes": [],
+  "possible_wedges": [
+    {
+      "type": "desktop_tool",
+      "offer": "Lightweight WPF memory/leak inspector that attaches to a running app and shows which navigated-away Page/Window instances are still rooted and by what reference chain."
+    },
+    {
+      "type": "plugin",
+      "offer": "Visual Studio/XAML analyzer that flags common WPF navigation leak patterns (unremoved event subscriptions, static references, missing KeepAlive/journal handling) at build time."
+    },
+    {
+      "type": "cli",
+      "offer": "CLI that takes a memory dump of a WPF process and reports retained Page/UserControl instances with retention paths, for CI or ad-hoc audits."
+    }
+  ],
+  "risks": [
+    "Single evidence item (one StackOverflow-style question) — no confirmed pattern across multiple users",
+    "Very low commercial_intent (0.05) and commitment (0.0) signals — no indication anyone would pay for a fix or tool",
+    "No existing substitutes mentioned, so it's unclear whether people already solve this with free profilers (e.g. dotMemory, WinDbg) rather than needing a new product",
+    "Persona pool is limited to individual developers troubleshooting, not evidence of team/enterprise budget tied to OwnAudit's audit-tooling positioning",
+    "Root cause in the evidence (event handler/journal retention) is a known WPF pattern with existing free documentation, so paid-tool demand is unproven"
+  ],
+  "cheapest_experiment": {
+    "hypothesis": "WPF developers hitting Frame navigation memory leaks would use (and some would pay for) a tool that pinpoints which retained Page instance and reference chain is causing the leak, rather than manually diagnosing with free profilers.",
+    "input": "Answer/comment on 5-10 similar WPF Frame memory-leak questions (StackOverflow, forums) offering to run their scenario through a free diagnostic and share the retention chain, linking a simple sign-up/landing page describing the tool.",
+    "output": "Count of developers who share a repro/dump and requests for the diagnostic, plus any explicit interest in a paid or ongoing tool.",
+    "commitment_event": "Developer sends a memory dump or repro project and/or signs up on a waitlist/landing page for the diagnostic tool.",
+    "success_threshold": "At least 3-4 of 10 contacted developers provide a repro or sign up, indicating real pain beyond a one-off question.",
+    "failure_threshold": "1 or fewer respond with a repro or sign-up, or respondents say existing free profilers already solved it."
+  },
+  "status": "investigate",
+  "rejection_reasons": [
+    "critic review not completed"
+  ]
+}

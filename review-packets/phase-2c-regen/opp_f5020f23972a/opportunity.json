@@ -1,0 +1,63 @@
+{
+  "schema": "demand-radar.opportunity-card/1",
+  "id": "opp_f5020f23972a",
+  "product": "own-audit",
+  "cluster_ids": [
+    "cluster_f5020f23972a"
+  ],
+  "problem": {
+    "statement": "WPF developers cannot diagnose why binding a Command through a non-INotifyPropertyChanged parent class's property to an INPC child causes objects to be retained (leaked) across window open/close cycles, and have no tooling to pinpoint the root cause."
+  },
+  "persona": {
+    "primary": "WPF/.NET developer debugging memory leaks in a legacy desktop application"
+  },
+  "context": {
+    "situation": "A developer noticed repeated window open/close cycles retaining objects when a Command binding chains through a non-INPC parent to an INPC child property, and turned to a public forum for an explanation since nothing pinpointed the root cause."
+  },
+  "evidence": {
+    "evidence_ids": [
+      "ev_317645262a35058b"
+    ],
+    "unique_authors": 1,
+    "source_families": 1
+  },
+  "signals": {
+    "demand_score": 4.7,
+    "confidence": 0.4633
+  },
+  "current_workarounds": [],
+  "existing_substitutes": [],
+  "possible_wedges": [
+    {
+      "type": "desktop_tool",
+      "offer": "A WPF binding/leak analyzer that inspects live or static binding expressions and flags non-INPC-parent-to-INPC-child command binding patterns known to cause CommandManager retention."
+    },
+    {
+      "type": "cli",
+      "offer": "A static analyzer CLI that scans XAML and code-behind for command bindings routed through non-INPC intermediate properties and reports likely leak sites."
+    },
+    {
+      "type": "plugin",
+      "offer": "A Visual Studio extension that highlights this specific WPF anti-pattern inline during code review."
+    }
+  ],
+  "risks": [
+    "Single evidence item with no corroborating reports, so demand signal is very thin.",
+    "Signals show low commercial intent (0.1) and zero commitment; the asker wanted an explanation, not a tool.",
+    "No workaround or existing substitute was mentioned, suggesting a knowledge gap rather than a tooling gap.",
+    "This CommandManager/WeakEventManager leak pattern is a well-documented WPF pitfall already explained in existing blog posts and SO answers, which may satisfy the need for free.",
+    "Persona and use case (one-off debugging question) may not generalize to a broader audit-tooling market."
+  ],
+  "cheapest_experiment": {
+    "hypothesis": "WPF developers who hit this specific command-binding retention pattern will submit their code for a free automated/manual leak check rather than just wanting a text explanation.",
+    "input": "Reply on the original thread and similar WPF memory-leak Q&A threads offering a free check: paste your ViewModel/XAML binding snippet and get a report flagging leak-prone binding paths.",
+    "output": "A short manual or lightly-automated leak-pattern report delivered by email.",
+    "commitment_event": "Developer submits their code snippet and email address for the check.",
+    "success_threshold": "5+ submissions across 5-10 similar threads within 2 weeks.",
+    "failure_threshold": "1 or fewer submissions after posting on 5+ similar threads."
+  },
+  "status": "investigate",
+  "rejection_reasons": [
+    "critic review not completed"
+  ]
+}

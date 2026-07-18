@@ -1,0 +1,63 @@
+{
+  "schema": "demand-radar.opportunity-card/1",
+  "id": "opp_6a0c518f1701",
+  "product": "own-audit",
+  "cluster_ids": [
+    "cluster_6a0c518f1701"
+  ],
+  "problem": {
+    "statement": "In Prism-based WPF apps, a view's DataContext is already null by the time it is removed from a region, so the view model reference is lost and cannot be identified or disposed, causing a memory leak."
+  },
+  "persona": {
+    "primary": "WPF developer maintaining a legacy Prism-based line-of-business application"
+  },
+  "context": {
+    "situation": "A developer maintaining a Prism-based WPF application with tabbed/region navigation needs to dispose view models when views are removed from a region, but the framework does not preserve the VM reference at removal time."
+  },
+  "evidence": {
+    "evidence_ids": [
+      "ev_f67e329e45f5a032"
+    ],
+    "unique_authors": 1,
+    "source_families": 1
+  },
+  "signals": {
+    "demand_score": 5.065,
+    "confidence": 0.4783
+  },
+  "current_workarounds": [],
+  "existing_substitutes": [],
+  "possible_wedges": [
+    {
+      "type": "plugin",
+      "offer": "A drop-in Prism RegionBehavior/NuGet package that captures the view model reference at region-add time (e.g. via attached property or WeakReference) so it can be reliably disposed on region removal, preventing the leak."
+    },
+    {
+      "type": "desktop_tool",
+      "offer": "A WPF memory/leak audit tool that scans a running or built Prism application for views/VMs whose DataContext is null at removal or that never get disposed, flagging leak-prone regions."
+    },
+    {
+      "type": "cli",
+      "offer": "A static analysis CLI for legacy .NET/WPF/Prism codebases that flags IDisposable view models wired via ViewModelLocator.AutoWireViewModel that have no verified disposal path on region removal."
+    }
+  ],
+  "risks": [
+    "Single evidence item (n=1) from one Stack Overflow-style question; no corroborating reports yet.",
+    "No commercial intent or willingness-to-pay signal in the evidence (commercial_intent score 0.05); this reads as a free community question, not a paid-tool inquiry.",
+    "No workarounds or substitute tools mentioned, so it's unclear whether existing free community answers already resolve this well enough to kill demand for a product.",
+    "Problem is narrow and technical (a specific Prism region-behavior gap), which may only affect a subset of legacy WPF/Prism shops rather than the broader OwnAudit audience.",
+    "Unclear whether this maps well to OwnAudit's audit-tooling positioning versus being a pure dev-library fix."
+  ],
+  "cheapest_experiment": {
+    "hypothesis": "WPF/Prism developers hitting this null-DataContext-on-removal leak would adopt a small free drop-in fix (region behavior snippet/package) that captures the VM reference before removal so it can be disposed.",
+    "input": "Publish a free gist/NuGet micro-package implementing a RegionBehavior that snapshots the VM at add-time (via a WeakReference or attached property) and reply to the original SO thread and 1-2 similar Prism WPF leak threads with a link.",
+    "output": "Downloads/stars on the package/gist and reply engagement (comments, upvotes, follow-up questions) on the linked threads.",
+    "commitment_event": "A developer installs the package, forks/stars the gist, or explicitly asks for a paid/supported version or audit of their app for similar leaks.",
+    "success_threshold": "20+ downloads or stars, or 3+ people asking for deeper help/paid support within 2 weeks of posting.",
+    "failure_threshold": "Fewer than 5 downloads/stars and no requests for further help after 2 weeks."
+  },
+  "status": "investigate",
+  "rejection_reasons": [
+    "critic review not completed"
+  ]
+}

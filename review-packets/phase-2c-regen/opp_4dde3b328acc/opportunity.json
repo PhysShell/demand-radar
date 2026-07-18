@@ -1,0 +1,58 @@
+{
+  "schema": "demand-radar.opportunity-card/1",
+  "id": "opp_4dde3b328acc",
+  "product": "own-audit",
+  "cluster_ids": [
+    "cluster_4dde3b328acc"
+  ],
+  "problem": {
+    "statement": "Reassigning a WPF Image control's SourceUri to reload the same image repeatedly grows memory usage instead of releasing the prior image, and developers have no easy way to confirm or diagnose the leak source in legacy WPF codebases."
+  },
+  "persona": {
+    "primary": "WPF developer maintaining a legacy .NET WPF application"
+  },
+  "context": {
+    "situation": "A developer working on an older WPF 4.0 application noticed memory usage climbing each time they set the same GIF SourceUri again after navigating away and back to the view."
+  },
+  "evidence": {
+    "evidence_ids": [
+      "ev_4f74cd8e3905d5dc"
+    ],
+    "unique_authors": 1,
+    "source_families": 1
+  },
+  "signals": {
+    "demand_score": 3.3000000000000003,
+    "confidence": 0.4933
+  },
+  "current_workarounds": [],
+  "existing_substitutes": [],
+  "possible_wedges": [
+    {
+      "type": "cli",
+      "offer": "A scanner that inspects WPF XAML/code-behind for Image SourceUri reassignment patterns known to leak and flags them with remediation notes."
+    },
+    {
+      "type": "desktop_tool",
+      "offer": "A lightweight memory-profiling companion that attaches to a running WPF app and highlights growth tied to repeated Image/BitmapImage source changes."
+    }
+  ],
+  "risks": [
+    "Only a single evidence item, apparently an older WPF 4.0-era report, so unclear how widespread or current this pain is",
+    "No commercial intent signal in the evidence (commercial_intent scored 0.0) and no willingness-to-pay indication",
+    "No workarounds or substitute tools were mentioned, so it's unclear how developers currently cope or what they've already tried",
+    "Evidence reflects a single individual developer, not clearly the enterprise/audit team persona OwnAudit targets"
+  ],
+  "cheapest_experiment": {
+    "hypothesis": "WPF developers maintaining legacy apps have recurring, costly memory leaks from Image SourceUri reassignment that they would want diagnosed or fixed.",
+    "input": "Post a short technical writeup on WPF Image/BitmapImage SourceUri memory leak patterns in a relevant developer forum (e.g. Stack Overflow tag, r/dotnet), offering a free review of a submitted XAML/code snippet.",
+    "output": "Count and content of replies from developers reporting their own instance of this leak or requesting the free review.",
+    "commitment_event": "A developer shares their actual project code/XAML for review or asks to be notified when a diagnostic tool becomes available.",
+    "success_threshold": "5 or more developers request the review or share code within 2 weeks of posting.",
+    "failure_threshold": "Fewer than 2 developers respond after 2 weeks."
+  },
+  "status": "investigate",
+  "rejection_reasons": [
+    "critic review not completed"
+  ]
+}

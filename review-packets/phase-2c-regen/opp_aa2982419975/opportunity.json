@@ -1,0 +1,67 @@
+{
+  "schema": "demand-radar.opportunity-card/1",
+  "id": "opp_aa2982419975",
+  "product": "own-audit",
+  "cluster_ids": [
+    "cluster_aa2982419975"
+  ],
+  "problem": {
+    "statement": "WPF UserControls instantiated off-screen (e.g. in a Windows Service for headless rendering) can be leaked by an internal focus-handler delegate that survives explicit Dispose() calls, and developers have no reliable way to diagnose or force full teardown."
+  },
+  "persona": {
+    "primary": ".NET/WPF developer running WPF controls headlessly in a server-side service or batch process"
+  },
+  "context": {
+    "situation": "A developer renders images from a custom WPF UserControl on a background STA thread inside a Windows Service, and a memory profiler shows each instance leaking via what appears to be an internal focus-handler delegate even though the control itself never subscribed to any events."
+  },
+  "evidence": {
+    "evidence_ids": [
+      "ev_9164f0efe072d5c6"
+    ],
+    "unique_authors": 1,
+    "source_families": 1
+  },
+  "signals": {
+    "demand_score": 4.15,
+    "confidence": 0.5533
+  },
+  "current_workarounds": [
+    "Calling ctrl.Dispose() after rendering, which the developer confirms does not resolve the leak"
+  ],
+  "existing_substitutes": [
+    ".Net Memory Profiler (used to detect the leak, not to fix it)"
+  ],
+  "possible_wedges": [
+    {
+      "type": "desktop_tool",
+      "offer": "A focused leak-diagnosis utility that attaches to a running .NET process, walks GC roots for WPF UserControl instances, and pinpoints internal delegate/event chains (e.g. FocusManager, InputManager) keeping them alive."
+    },
+    {
+      "type": "plugin",
+      "offer": "A Roslyn/analyzer plugin for legacy WPF audit tooling that flags code patterns known to cause headless/off-thread WPF control leaks (e.g. UserControl created without a HwndSource, missing explicit focus/input manager cleanup)."
+    },
+    {
+      "type": "concierge_service",
+      "offer": "A paid deep-dive audit where a WPF memory expert reviews a specific leaking control and profiler dump and delivers a concrete fix, targeted at teams doing headless WPF rendering."
+    }
+  ],
+  "risks": [
+    "Single evidence item from one forum post; no corroborating reports of this exact leak pattern",
+    "Commercial intent signal is very low (0.1) and no willingness-to-pay is expressed",
+    "No named competing tools or substitutes beyond the profiler already used to detect (not fix) the issue",
+    "Scenario is a niche edge case (headless/off-UI-thread WPF rendering in a service) rather than mainstream WPF app usage, which may limit addressable market",
+    "Unclear whether the root cause is a general WPF framework quirk or specific to this developer's control, which affects how broadly a fix/tool would generalize"
+  ],
+  "cheapest_experiment": {
+    "hypothesis": "WPF/.NET developers doing headless UserControl rendering in services would engage with a free, concrete root-cause explanation and fix for this exact focus-handler leak, indicating latent demand for a diagnostic tool or paid audit.",
+    "input": "A detailed, technically accurate answer/blog post explaining the FocusManager/InputManager delegate root cause and a working fix for the reported StackOverflow-style question, with a link to a simple free diagnostic checklist or waitlist for a deeper tool.",
+    "output": "Upvotes, accepted-answer status, comments, and click-through/signup rate on the linked checklist or waitlist.",
+    "commitment_event": "A reader clicks through to join a waitlist or requests a paid deep-dive review of their own leak.",
+    "success_threshold": "At least 5-10 independent developers engage (upvote/comment/click) within a few weeks, with at least 1-2 waitlist signups or paid inquiries, suggesting the pattern recurs beyond one report.",
+    "failure_threshold": "Answer/post gets essentially no engagement (no independent confirmations of the same leak pattern) and zero signups after a few weeks, suggesting the issue is too rare to build around."
+  },
+  "status": "investigate",
+  "rejection_reasons": [
+    "critic review not completed"
+  ]
+}

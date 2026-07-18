@@ -1,0 +1,68 @@
+{
+  "schema": "demand-radar.opportunity-card/1",
+  "id": "opp_457cf4b8f64a",
+  "product": "own-audit",
+  "cluster_ids": [
+    "cluster_457cf4b8f64a"
+  ],
+  "problem": {
+    "statement": "WPF's native DataGrid becomes drastically slower than the old Silverlight grid when filtering, because a CollectionView Reset event triggers a deeply nested recursive DescendantsWalker/UpdateLayout cycle that developers can profile but not fix."
+  },
+  "persona": {
+    "primary": "WPF developer migrating a large custom-grid Silverlight application to WPF"
+  },
+  "context": {
+    "situation": "A team porting a Silverlight app with a custom DataGrid used across nearly all views finds filtering takes ~5x longer in WPF (3.7s vs 700ms) and their own profiling only reveals the call tree, not a solution."
+  },
+  "evidence": {
+    "evidence_ids": [
+      "ev_ce747ccabfb42ab7"
+    ],
+    "unique_authors": 1,
+    "source_families": 1
+  },
+  "signals": {
+    "demand_score": 3.5250000000000004,
+    "confidence": 0.4483
+  },
+  "current_workarounds": [
+    "Built parallel Silverlight and WPF test apps with identical data to isolate and compare the performance gap",
+    "Used the dotTrace profiler to capture call-tree snapshots of the filtering/layout operations to locate the bottleneck"
+  ],
+  "existing_substitutes": [
+    "dotTrace (used for profiling, not as a fix)"
+  ],
+  "possible_wedges": [
+    {
+      "type": "concierge_service",
+      "offer": "Fixed-price diagnostic engagement: send us your DataGrid/filtering setup and profiler trace, we identify the specific WPF layout/virtualization anti-pattern and deliver a working fix or mitigation."
+    },
+    {
+      "type": "desktop_tool",
+      "offer": "Standalone analyzer that ingests a WPF app's XAML/bindings (or a dotTrace/PerfView snapshot) and flags known DataGrid/ItemsControl performance anti-patterns like CollectionChanged.Reset triggering full UpdateLayout, with suggested remediations."
+    },
+    {
+      "type": "cli",
+      "offer": "Command-line audit that scans a WPF/.NET codebase for legacy performance and binding anti-patterns inherited from Silverlight ports, producing a report ranked by expected impact."
+    }
+  ],
+  "risks": [
+    "Single evidence item from one forum thread — no confirmation this is a widespread, recurring pain point",
+    "Signals show low commercial intent and commitment (0.15 and 0.1), suggesting the poster wants a free community answer, not a paid fix",
+    "The underlying issue may require a genuine WPF framework-level workaround (custom ItemsControl/virtualization) rather than something auditable or automatable",
+    "No named competing tools or substitutes appear in the evidence, so it's unclear whether buyers would look for a paid solution at all versus continuing to search forums for free",
+    "Only one persona type (Silverlight-to-WPF migration developer) represented; unclear how common this specific migration scenario still is in 2026"
+  ],
+  "cheapest_experiment": {
+    "hypothesis": "WPF developers hitting this specific DataGrid filtering slowdown would pay for a fixed-price diagnostic that pinpoints the cause and supplies a working fix, rather than continuing to self-profile with no resolution.",
+    "input": "Reply to this and similar unanswered WPF performance threads (Stack Overflow, MSDN/Microsoft Q&A, relevant subreddits) offering a paid fixed-price diagnosis-and-fix for DataGrid/CollectionView Reset performance issues, linking to a simple booking/payment page.",
+    "output": "Count of thread engagements, DMs, and payment-page visits/starts generated from the outreach.",
+    "commitment_event": "At least one developer pays the fixed fee (or puts down a deposit) for the diagnostic engagement.",
+    "success_threshold": "3+ people from outreach express concrete willingness to pay or start checkout within 2-3 weeks",
+    "failure_threshold": "0-1 people engage with willingness to pay after posting in several relevant threads"
+  },
+  "status": "investigate",
+  "rejection_reasons": [
+    "critic review not completed"
+  ]
+}

@@ -1,0 +1,69 @@
+{
+  "schema": "demand-radar.opportunity-card/1",
+  "id": "opp_944944204155",
+  "product": "own-audit",
+  "cluster_ids": [
+    "cluster_944944204155"
+  ],
+  "problem": {
+    "statement": "WPF's internal event-locking code (ReaderWriterLockWrapper) allocates a huge number of Action objects on every PropertyChanged firing, causing blocking GC pauses that are only diagnosable by tracing a memory profiler down into WPF framework internals."
+  },
+  "persona": {
+    "primary": "WPF application developer debugging UI performance/jank"
+  },
+  "context": {
+    "situation": "A developer building a fast-scrolling WPF image grid hit severe frame-rate drops that took a memory profiler and framework source inspection to trace to a WPF-internal locking pattern."
+  },
+  "evidence": {
+    "evidence_ids": [
+      "ev_4ef0f3095fb2b918"
+    ],
+    "unique_authors": 1,
+    "source_families": 1
+  },
+  "signals": {
+    "demand_score": 3.6999999999999997,
+    "confidence": 0.5083
+  },
+  "current_workarounds": [
+    "Manually reduced allocations elsewhere in the app to offset GC pressure, improving performance from 10fps to 25fps",
+    "Used a memory profiler and read WPF reference source directly to trace allocations to the internal ReaderWriterLockWrapper class"
+  ],
+  "existing_substitutes": [
+    "Generic .NET memory profiler (unnamed)",
+    "Manual inspection of referencesource.microsoft.com"
+  ],
+  "possible_wedges": [
+    {
+      "type": "desktop_tool",
+      "offer": "Diagnostic tool that scans a running WPF app's allocations for known problematic framework-internal patterns (e.g. PropertyChanged-triggered ReaderWriterLockWrapper Action allocations) and flags root cause automatically."
+    },
+    {
+      "type": "plugin",
+      "offer": "Profiler plugin/rule pack that recognizes this specific WPF GC-storm signature and surfaces the root cause directly instead of requiring manual framework-source spelunking."
+    },
+    {
+      "type": "cli",
+      "offer": "Static/dynamic analyzer for WPF codebases that flags high-frequency PropertyChanged usage on virtualized/ItemsControl grids as GC-storm risk before it hits production."
+    }
+  ],
+  "risks": [
+    "Single evidence item (n=1); no corroborating reports of this exact pattern",
+    "No commercial intent or willingness-to-pay signal in the evidence (commercial_intent 0.1, commitment 0.05)",
+    "Only one persona/context observed: a solo developer debugging their own app, not a team or enterprise buyer",
+    "Evidence is a technical Q&A post, not a purchase inquiry, so demand for a paid tool is inferred, not stated",
+    "Unclear how common this specific high-frequency PropertyChanged + large virtualized grid scenario is outside this one app"
+  ],
+  "cheapest_experiment": {
+    "hypothesis": "WPF developers hit by GC-pause jank from the PropertyChanged/ReaderWriterLockWrapper allocation storm would use a tool that auto-detects this specific framework pattern instead of manually tracing it via profiler + framework source.",
+    "input": "Publish a short technical writeup naming the exact issue (ReaderWriterLockWrapper Action allocations on PropertyChanged) in WPF dev forums/subreddits, with a landing page offering a free diagnostic script plus signup for an audit-tool waitlist.",
+    "output": "Landing page click-throughs and email/waitlist signups.",
+    "commitment_event": "Developer submits email or downloads the free diagnostic script.",
+    "success_threshold": ">=15 signups or downloads within 2 weeks from roughly 500 impressions.",
+    "failure_threshold": "<5 signups or downloads after 2 weeks despite comparable impressions."
+  },
+  "status": "investigate",
+  "rejection_reasons": [
+    "critic review not completed"
+  ]
+}

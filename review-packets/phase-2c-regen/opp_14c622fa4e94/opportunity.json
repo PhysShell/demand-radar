@@ -1,0 +1,100 @@
+{
+  "schema": "demand-radar.opportunity-card/1",
+  "id": "opp_14c622fa4e94",
+  "product": "own-audit",
+  "cluster_ids": [
+    "cluster_14c622fa4e94"
+  ],
+  "problem": {
+    "statement": "Standard memory profilers (dotMemory, ANTS, SciTech, VS diagnostics, dotnet-dump/gcroot) show that memory is retained or growing — or fail to reveal it despite low managed usage — but don't trace the ownership/reference path back to the specific code responsible, leaving developers unable to pinpoint and fix the leak."
+  },
+  "persona": {
+    "primary": "WPF/legacy .NET desktop developer maintaining a WinForms or hybrid WinForms/WPF production app"
+  },
+  "context": {
+    "situation": "Developers maintaining legacy WinForms/WPF .NET applications hit production memory leaks or OOM crashes after hours of runtime, run a profiler that confirms objects are retained, but get stuck because the tool doesn't explain who is holding the reference (DI scopes, event subscriptions, async continuations, third-party controls, XAML bindings)."
+  },
+  "evidence": {
+    "evidence_ids": [
+      "ev_0053546b6c06b1f9",
+      "ev_1085244fa68a3d50",
+      "ev_2316792245cbdfec",
+      "ev_35859fa9387ed1b7",
+      "ev_3ff82e66fbcacccf",
+      "ev_4fa892d8d2f585a1",
+      "ev_522cef0a60c0ac91",
+      "ev_5418ee15f7f72f14",
+      "ev_62dd3416c604ff92",
+      "ev_6d00d6d3ad93b72d",
+      "ev_88c810286a5a3fb5",
+      "ev_9c2d3519846b7236",
+      "ev_a1d47c2546099a14",
+      "ev_a745a50f17e1c17d",
+      "ev_ba4ff70ba233bed6",
+      "ev_ba68e99984cead65",
+      "ev_cdc81411dbb25578",
+      "ev_cf13d3bb477f9e5b",
+      "ev_d68f4bed5e20041d",
+      "ev_f3d0deae1a9aec92",
+      "ev_fbd9fac4ce4c34a1"
+    ],
+    "unique_authors": 19,
+    "source_families": 2
+  },
+  "signals": {
+    "demand_score": 5.083511904761905,
+    "confidence": 0.9077
+  },
+  "current_workarounds": [
+    "Manually walking GC roots with dotnet-dump dumpheap/gcroot commands",
+    "Isolating the leak by commenting out XAML elements/bindings one at a time",
+    "Speculatively implementing IDisposable and manually nulling fields without confirming the actual cause",
+    "Switching APIs (BeginInvoke vs InvokeAsync, WinForms control vs WPF equivalent) to sidestep the leak without understanding it",
+    "Posting full source code publicly asking strangers to find the bug",
+    "Attaching the Visual Studio Remote Debugger directly to a production process",
+    "Forcing repeated GC.Collect()/WaitForPendingFinalizers() cycles",
+    "Manually tracking DI lifetime scopes/instances in a dictionary to force disposal"
+  ],
+  "existing_substitutes": [
+    "JetBrains dotMemory",
+    "ANTS Memory Profiler",
+    "SciTech .NET Memory Profiler",
+    "Visual Studio Diagnostic Tools / Remote Debugger",
+    "dotnet-dump (dumpheap/gcroot)",
+    ".NET CLR Profiler",
+    "Rider memory profiler"
+  ],
+  "possible_wedges": [
+    {
+      "type": "desktop_tool",
+      "offer": "Ingest a memory dump or profiler snapshot and produce a plain-English ownership/root-cause chain report tuned to common WinForms/WPF leak patterns (DI scopes, WeakEventManager, Dispatcher, static events, virtualized ItemsControl/ListView)."
+    },
+    {
+      "type": "cli",
+      "offer": "A dotnet-dump wrapper that automates gcroot analysis across suspect types and outputs a ranked, annotated ownership report for use against production dumps or in CI."
+    },
+    {
+      "type": "concierge_service",
+      "offer": "Send-us-your-dump paid audit: an expert traces the ownership chain and delivers a root-cause report for legacy WinForms/WPF teams without in-house profiling expertise."
+    }
+  ],
+  "risks": [
+    "All evidence is from public Q&A/bug trackers, not paying customers; commercial_intent signals are consistently low (0.05-0.15)",
+    "Root causes are highly varied (DI containers, event wiring, async/Dispatcher, third-party control internals, LINQ internals) so a tool needs broad pattern coverage to be reliably useful",
+    "Target users are already technically resourceful (using dotnet-dump, dotMemory) raising the bar to add value over existing free/paid profilers",
+    "Several leaks trace into third-party control internals (Telerik, Syncfusion, DevExpress, Krypton) that a tool can't fully instrument without vendor-level access",
+    "No evidence of anyone explicitly offering to pay; commitment signals are near zero across the cluster"
+  ],
+  "cheapest_experiment": {
+    "hypothesis": "Legacy .NET/WPF developers who've hit a wall with existing profilers (can see retention but not ownership) will pay for a fast, expert root-cause diagnosis of their leak.",
+    "input": "A memory dump or profiler snapshot plus a description of the symptom, submitted by a developer stuck on an unexplained leak (e.g. sourced from relevant Stack Overflow/GitHub issue threads).",
+    "output": "A written ownership/root-cause chain report identifying the exact code path or object holding the reference.",
+    "commitment_event": "Developer pays a flat fee (e.g. $150-300) upfront, or explicitly agrees to pay before the diagnosis is delivered.",
+    "success_threshold": "At least 3 of 10 developers contacted via relevant leak-debugging threads agree to pay for the diagnosis.",
+    "failure_threshold": "Fewer than 1 of 10 contacted convert, or all responses ask for free help despite the paid offer."
+  },
+  "status": "investigate",
+  "rejection_reasons": [
+    "critic review not completed"
+  ]
+}

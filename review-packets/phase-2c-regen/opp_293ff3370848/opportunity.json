@@ -1,0 +1,65 @@
+{
+  "schema": "demand-radar.opportunity-card/1",
+  "id": "opp_293ff3370848",
+  "product": "own-audit",
+  "cluster_ids": [
+    "cluster_293ff3370848"
+  ],
+  "problem": {
+    "statement": "WPF developers cannot get custom ContextMenu subclasses garbage collected because the framework's ContextMenuAutomationPeer silently retains a reference, leaking memory and keeping the owning window alive."
+  },
+  "persona": {
+    "primary": "WPF/.NET desktop developer maintaining a legacy line-of-business application"
+  },
+  "context": {
+    "situation": "A developer profiling a WPF app with a memory profiler (dotMemory) traced a leak of a custom ContextMenu-derived class to an internal reference held by ContextMenuAutomationPeer and filed it as a framework bug report."
+  },
+  "evidence": {
+    "evidence_ids": [
+      "ev_95d3bcc5c08c54b5"
+    ],
+    "unique_authors": 1,
+    "source_families": 1
+  },
+  "signals": {
+    "demand_score": 5.3,
+    "confidence": 0.5383
+  },
+  "current_workarounds": [],
+  "existing_substitutes": [
+    "JetBrains dotMemory (used to diagnose the leak)"
+  ],
+  "possible_wedges": [
+    {
+      "type": "cli",
+      "offer": "Static scanner for WPF codebases that flags known framework-level leak patterns (e.g. ContextMenu/AutomationPeer retention) before a profiler session is needed."
+    },
+    {
+      "type": "plugin",
+      "offer": "Visual Studio/Rider analyzer that warns when a developer subclasses WPF controls like ContextMenu without accounting for known AutomationPeer retention issues."
+    },
+    {
+      "type": "concierge_service",
+      "offer": "One-off audit service: submit a WPF codebase and receive a report of known framework memory-leak patterns present in it."
+    }
+  ],
+  "risks": [
+    "Single evidence item (n=1); no indication how widespread this specific leak pattern is among WPF developers.",
+    "No workaround was found or reported in the evidence, and no substitute product was evaluated for fixing (only a profiler for detecting) it.",
+    "Signals show low commercial intent (0.1) and zero commitment (0.0) in the source evidence.",
+    "Root cause is a Microsoft WPF framework defect, not something a third-party audit tool can directly patch, only detect or warn about.",
+    "Unclear willingness to pay for a niche static-analysis feature versus using existing general-purpose profilers like dotMemory."
+  ],
+  "cheapest_experiment": {
+    "hypothesis": "WPF developers hitting hard-to-diagnose framework-level memory leaks (e.g. AutomationPeer retention) would engage with a free scan/checklist offer before needing a full profiler session.",
+    "input": "Post a short 'known WPF memory-leak patterns' checklist plus an offer of a free one-off leak-pattern scan of a submitted repo in WPF/.NET developer communities (e.g. r/dotnet, WPF GitHub issue threads, Stack Overflow).",
+    "output": "Count of replies/DMs from developers requesting the scan or asking for more detail.",
+    "commitment_event": "A developer submits a repo link or codebase snippet plus contact email for the free audit.",
+    "success_threshold": "5+ developers request the audit within 2 weeks of posting.",
+    "failure_threshold": "Fewer than 2 requests after 2 weeks of reasonable community reach."
+  },
+  "status": "investigate",
+  "rejection_reasons": [
+    "critic review not completed"
+  ]
+}

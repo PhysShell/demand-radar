@@ -1,0 +1,64 @@
+{
+  "schema": "demand-radar.opportunity-card/1",
+  "id": "opp_7399244f259b",
+  "product": "own-audit",
+  "cluster_ids": [
+    "cluster_7399244f259b"
+  ],
+  "problem": {
+    "statement": "Filtering large WPF DataGrids via ListCollectionView/CollectionView.Filter causes severe slowdowns and an unexplained large memory leak, and developers have no clear diagnosis or fix."
+  },
+  "persona": {
+    "primary": "WPF developer building data-heavy line-of-business desktop apps"
+  },
+  "context": {
+    "situation": "A developer binds a DataGrid to ~37,000 items through a ListCollectionView and needs fast multi-column text filtering, but applying CollectionView.Filter in place is slow and leaks memory with no obvious cause."
+  },
+  "evidence": {
+    "evidence_ids": [
+      "ev_ddd863ecd0a1df0c"
+    ],
+    "unique_authors": 1,
+    "source_families": 1
+  },
+  "signals": {
+    "demand_score": 4.8,
+    "confidence": 0.4633
+  },
+  "current_workarounds": [
+    "Discard the CollectionView.Filter approach and instead build a brand-new filtered ObservableCollection via LINQ on every filter change"
+  ],
+  "existing_substitutes": [],
+  "possible_wedges": [
+    {
+      "type": "desktop_tool",
+      "offer": "A legacy WPF audit tool that scans/profiles a codebase for CollectionView.Filter memory-leak and performance antipatterns and reports flagged locations with fix guidance."
+    },
+    {
+      "type": "plugin",
+      "offer": "A drop-in NuGet library replacement for ListCollectionView that provides leak-free, fast multi-column filtering for large DataGrid-bound collections."
+    },
+    {
+      "type": "concierge_service",
+      "offer": "A paid one-off WPF performance audit: developer submits their CollectionView/DataGrid code and gets a diagnosed leak report plus a fix."
+    }
+  ],
+  "risks": [
+    "Only a single evidence item from one developer; no indication of how widespread this is across legacy WPF audit clients",
+    "No commercial intent or willingness-to-pay signal present in the evidence",
+    "Root cause of the leak is unconfirmed (could be app-level misuse of CollectionView rather than a systemic framework issue worth productizing)",
+    "Evidence comes from a general WPF forum question, not from OwnAudit's actual audit-tooling customer base, so relevance to the audit-tool persona is an inference"
+  ],
+  "cheapest_experiment": {
+    "hypothesis": "WPF developers maintaining large-dataset DataGrids hit CollectionView filter memory leaks often enough to want a free diagnostic or paid audit fix.",
+    "input": "Reply on the original thread (and similar WPF/DataGrid forum posts) with a technical explanation plus an offer of a free 'CollectionView leak checklist' in exchange for an email, linking to a paid audit option.",
+    "output": "Count of checklist requests (emails) and any replies asking about a paid audit or fix.",
+    "commitment_event": "Developer submits their email for the checklist or replies asking for the paid audit.",
+    "success_threshold": "At least 10% of thread viewers/repliers request the checklist or ask about the paid audit within 2 weeks.",
+    "failure_threshold": "Under 2% engagement or zero replies indicating willingness to pay within 2 weeks."
+  },
+  "status": "investigate",
+  "rejection_reasons": [
+    "critic review not completed"
+  ]
+}

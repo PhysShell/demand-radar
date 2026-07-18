@@ -1,0 +1,65 @@
+{
+  "schema": "demand-radar.opportunity-card/1",
+  "id": "opp_2ccf72276bfc",
+  "product": "own-audit",
+  "cluster_ids": [
+    "cluster_2ccf72276bfc"
+  ],
+  "problem": {
+    "statement": "Wrapping a virtualizing WPF ListView in a ScrollViewer (needed for features like zoom/scale) silently disables UI virtualization, turning a 5-second dialog load into a ~60-second one for large datasets."
+  },
+  "persona": {
+    "primary": "WPF/.NET developer maintaining a legacy desktop line-of-business application with large data grids"
+  },
+  "context": {
+    "situation": "A WPF developer building a dialog with a zoom feature needs to nest a large ListView (10,000 rows) inside a ScrollViewer, but this silently disables ListView virtualization."
+  },
+  "evidence": {
+    "evidence_ids": [
+      "ev_5d5becdbab391dfa"
+    ],
+    "unique_authors": 1,
+    "source_families": 1
+  },
+  "signals": {
+    "demand_score": 3.4250000000000003,
+    "confidence": 0.4483
+  },
+  "current_workarounds": [
+    "Removing the ScrollViewer entirely restores fast load times but sacrifices the desired zoom feature.",
+    "Explicitly setting VirtualizingPanel.IsVirtualizing / VirtualizationMode on the ListView (attempted, did not fully resolve the issue since ScrollViewer was still present)."
+  ],
+  "existing_substitutes": [],
+  "possible_wedges": [
+    {
+      "type": "plugin",
+      "offer": "A XAML/Visual Studio analyzer that statically flags virtualization-breaking patterns (like ScrollViewer wrapping a virtualizing ListView) before the app ships."
+    },
+    {
+      "type": "desktop_tool",
+      "offer": "A standalone WPF performance audit tool that scans a project's XAML for known virtualization anti-patterns and reports estimated load-time impact."
+    },
+    {
+      "type": "other",
+      "offer": "A drop-in custom Panel/attached-behavior (NuGet package) that lets developers keep zoom/scale features without disabling ListView virtualization."
+    }
+  ],
+  "risks": [
+    "Single evidence item from one developer; no corroborating reports of prevalence.",
+    "Evidence shows near-zero commercial intent (0.05) and no commitment signal (0.0) -- this reads as a free StackOverflow-style question, not a validated willingness to pay.",
+    "Very narrow, specific technical edge case; may already have known community fixes (e.g., custom virtualizing panels) that satisfy demand for free.",
+    "Unclear whether this pattern is common enough across legacy WPF codebases to justify a dedicated tool versus being a one-off bug."
+  ],
+  "cheapest_experiment": {
+    "hypothesis": "WPF developers maintaining legacy desktop apps would use a free static XAML checker that flags virtualization-breaking patterns (e.g., ScrollViewer wrapping a virtualizing ListView) if it saves them from ~60s vs ~5s load-time regressions.",
+    "input": "Post on WPF-focused forums (Stack Overflow answer, r/csharp, WPF Discord) referencing this exact ScrollViewer/virtualization bug, offering a free 'send me your XAML, I'll scan for virtualization anti-patterns' concierge check or a waitlist for an analyzer.",
+    "output": "Count of developers who submit a XAML file for review or join the waitlist.",
+    "commitment_event": "A developer submits their XAML file or signs up with their email for early access.",
+    "success_threshold": "10+ submissions/signups within 2 weeks of posting.",
+    "failure_threshold": "Fewer than 3 responses after 2 weeks despite multiple forum posts."
+  },
+  "status": "investigate",
+  "rejection_reasons": [
+    "critic review not completed"
+  ]
+}

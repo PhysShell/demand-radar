@@ -1,0 +1,64 @@
+{
+  "schema": "demand-radar.opportunity-card/1",
+  "id": "opp_78e1439eb93c",
+  "product": "own-audit",
+  "cluster_ids": [
+    "cluster_78e1439eb93c"
+  ],
+  "problem": {
+    "statement": "A lambda passed to Dispatcher.Invoke captures 'this' (or view-model fields), keeping a strong reference alive that prevents the view model from being disposed or garbage collected, causing a memory leak."
+  },
+  "persona": {
+    "primary": "WPF developer maintaining a legacy .NET desktop application"
+  },
+  "context": {
+    "situation": "A WPF developer maintaining a legacy .NET/WPF app is debugging a memory leak where refreshing a view model from a background thread via Dispatcher.Invoke keeps the view model alive."
+  },
+  "evidence": {
+    "evidence_ids": [
+      "ev_8fe0631c765a5fa8"
+    ],
+    "unique_authors": 1,
+    "source_families": 1
+  },
+  "signals": {
+    "demand_score": 5.1,
+    "confidence": 0.5083
+  },
+  "current_workarounds": [
+    "Manually narrowed the leak to a specific refresh method by code inspection"
+  ],
+  "existing_substitutes": [],
+  "possible_wedges": [
+    {
+      "type": "plugin",
+      "offer": "Roslyn/VS analyzer rule that flags Dispatcher.Invoke/BeginInvoke lambdas capturing 'this' or instance fields, warning of a likely GC-retention leak."
+    },
+    {
+      "type": "cli",
+      "offer": "CLI linter for legacy WPF codebases that scans for Dispatcher-closure leak patterns as part of CI, feeding into a broader audit report."
+    },
+    {
+      "type": "desktop_tool",
+      "offer": "Standalone memory-leak scanner for WPF solutions that highlights view models retained via Dispatcher lambda captures."
+    }
+  ],
+  "risks": [
+    "Single evidence item (one Stack Overflow-style question), so demand and frequency of this exact pattern are unverified.",
+    "Signals show low commercial intent (0.1) and zero commitment (0.0) -- the asker wants a code fix, not a tool or audit service.",
+    "No existing substitute tools were mentioned, so it's unclear whether developers would look for/pay for a dedicated detector versus just fixing the one call site.",
+    "Unclear if this leak pattern is common enough across legacy WPF codebases to justify a dedicated audit rule versus general leak-detection profiling tools already in use."
+  ],
+  "cheapest_experiment": {
+    "hypothesis": "WPF developers hitting this specific Dispatcher.Invoke lambda-capture leak would install/use a free static-analysis rule that flags it automatically, and some would want it bundled into a broader legacy WPF audit tool.",
+    "input": "Publish a single free Roslyn analyzer/diagnostic rule that detects Dispatcher.Invoke/BeginInvoke lambdas capturing 'this' or view-model fields; post it as an answer/tool link on the relevant WPF forum threads and a legacy-.NET subreddit.",
+    "output": "Install count / GitHub stars on the analyzer repo, plus any comments asking for more rules or an audit report of a whole codebase.",
+    "commitment_event": "A developer installs the analyzer in their project or explicitly asks to run it against their full WPF codebase.",
+    "success_threshold": "10+ installs or explicit 'run this on my codebase' requests within 2 weeks of posting.",
+    "failure_threshold": "Fewer than 3 installs/requests and no unprompted follow-up questions after 2 weeks."
+  },
+  "status": "investigate",
+  "rejection_reasons": [
+    "critic review not completed"
+  ]
+}

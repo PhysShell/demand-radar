@@ -1,0 +1,65 @@
+{
+  "schema": "demand-radar.opportunity-card/1",
+  "id": "opp_19bf1cafaca4",
+  "product": "own-audit",
+  "cluster_ids": [
+    "cluster_19bf1cafaca4"
+  ],
+  "problem": {
+    "statement": "WPF developers who repeatedly reassign MediaElement.Source at runtime see memory usage grow unbounded and never reclaimed by the GC, eventually crashing the app, with no known working fix in official docs or forums."
+  },
+  "persona": {
+    "primary": "WPF developer building media-viewing/playback features into a legacy .NET desktop app"
+  },
+  "context": {
+    "situation": "A WPF developer builds a media-heavy desktop app that loops through assigning new image/gif/video sources to a single MediaElement control at runtime."
+  },
+  "evidence": {
+    "evidence_ids": [
+      "ev_4999264d764c6bdd"
+    ],
+    "unique_authors": 1,
+    "source_families": 1
+  },
+  "signals": {
+    "demand_score": 6.25,
+    "confidence": 0.5083
+  },
+  "current_workarounds": [
+    "Calling Stop() and setting Source to null after media playback ends",
+    "Manually setting LoadedBehavior to Manual and explicitly calling Stop(), Close(), and resetting Source before assigning a new one"
+  ],
+  "existing_substitutes": [],
+  "possible_wedges": [
+    {
+      "type": "desktop_tool",
+      "offer": "A lightweight WPF UserControl/NuGet package wrapping MediaElement with proper resource disposal to eliminate the reassignment leak."
+    },
+    {
+      "type": "plugin",
+      "offer": "An OwnAudit static-analysis rule that flags MediaElement.Source reassignment as a known WPF memory-leak pattern with a suggested fix."
+    },
+    {
+      "type": "concierge_service",
+      "offer": "Paid one-off diagnosis and fix for teams whose WPF app crashes from unbounded MediaElement memory growth."
+    }
+  ],
+  "risks": [
+    "Single evidence item from one persona/context, so prevalence beyond this one developer is unconfirmed",
+    "Signals show low commercial intent (0.1) and zero commitment (0.0) in the evidence",
+    "Problem is scoped to a single WPF control (MediaElement), which may be too narrow to justify a standalone product versus an audit-rule add-on",
+    "No named competing tools or substitutes appear in the evidence, so it's unclear how people currently search for or evaluate a fix"
+  ],
+  "cheapest_experiment": {
+    "hypothesis": "WPF developers hitting the MediaElement source-reassignment leak would adopt a drop-in fix (packaged control or documented patch) instead of continuing manual Stop/Close/null workarounds that don't fully work.",
+    "input": "Post a proposed fix write-up (e.g., a gist/NuGet README describing a leak-safe MediaElement wrapper) as an answer on the existing unanswered Stack Overflow/forum threads, offering early access to a free patch/package.",
+    "output": "Comments, upvotes, and DMs/emails from developers asking to try the patch or wanting to be notified when it's ready.",
+    "commitment_event": "A developer messages or comments asking for access to the patch/package, or provides contact info to be notified.",
+    "success_threshold": "5+ people request access or say they'd use it within 2 weeks of posting.",
+    "failure_threshold": "Fewer than 2 responses after 2 weeks despite reasonable thread views."
+  },
+  "status": "investigate",
+  "rejection_reasons": [
+    "critic review not completed"
+  ]
+}
