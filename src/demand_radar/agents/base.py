@@ -40,6 +40,19 @@ class AgentRunner(Protocol):
         run_dir: Path,
     ) -> AgentResult: ...
 
+    def verified_profiles(self) -> frozenset[str]:
+        """The set of capability-profile names this runner can PROVABLY
+        enforce -- live-verified against a real install/behavior, not
+        merely vendor-documented or asserted in a flag's name. A caller
+        (`cli.py::run`) must refuse to route untrusted content (evidence
+        text) through a runner whose verified set does not contain the
+        requested `capability_profile`; see docs/trust-boundaries.md and
+        docs/runner-contract.md. Documentation of what a flag is *supposed*
+        to do is not verification -- only an observed, adversarial smoke
+        test against a live binary earns a profile a place in this set.
+        """
+        ...
+
 
 class NeverCalledRunner:
     """An `AgentRunner` whose `.run()` always raises. Used wherever a role
@@ -66,6 +79,15 @@ class NeverCalledRunner:
             f"NeverCalledRunner.run() invoked for task_id={task_id!r} -- this role must "
             f"never call an agent"
         )
+
+    def verified_profiles(self) -> frozenset[str]:
+        # Vacuously safe: run() above always raises, so this runner can
+        # never actually execute anything against any capability profile --
+        # there is nothing here that could ever leak untrusted content
+        # anywhere. Reporting the full profile is honest, not optimistic:
+        # "provably enforces read-only-data" is trivially true of code that
+        # provably never runs at all.
+        return frozenset({READ_ONLY_DATA_PROFILE})
 
 
 def sha256_text(text: str) -> str:

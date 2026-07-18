@@ -26,6 +26,14 @@ def _schema_path(tmp_path: Path) -> Path:
     return path
 
 
+def test_verified_profiles_includes_read_only_data() -> None:
+    """FakeRunner never spawns a subprocess and never reads outside
+    run_dir, so read-only-data holds by construction, not by verification
+    against a real backend."""
+    runner = FakeRunner()
+    assert runner.verified_profiles() == frozenset({READ_ONLY_DATA_PROFILE})
+
+
 def test_valid_output_passes_schema(tmp_path: Path) -> None:
     runner = FakeRunner(
         scenarios={"t": FakeScenario(kind="success", output={"evidence_id": "ev_1", "value": 1.0})}

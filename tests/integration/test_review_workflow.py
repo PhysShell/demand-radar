@@ -554,12 +554,16 @@ def test_cli_run_refuses_codex_analyst_even_with_critic_human(tmp_path: Path) ->
         ],
     )
     assert result.exit_code == 2
-    assert "codex_unverified_for_untrusted_content" in result.stdout
+    assert "unverified_capability_profile" in result.stdout
+    assert "analyst engine 'codex'" in result.stdout
 
 
 def test_cli_run_refuses_analyst_human_as_an_unknown_runner(tmp_path: Path) -> None:
     """--analyst human is not a legal value -- human is only ever a critic
-    mode. Falls through to get_runner's existing "unknown runner" refusal."""
+    mode. Falls through to get_runner's existing "unknown engine" refusal
+    (get_runner's two axes are engine and runner/transport; "human" is
+    neither "fake" nor "claude"/"codex", so it fails the engine check, not
+    the runner/transport one)."""
     db = tmp_path / "d.db"
     runner.invoke(app, ["init", "--db", str(db)])
     runner.invoke(
@@ -582,7 +586,7 @@ def test_cli_run_refuses_analyst_human_as_an_unknown_runner(tmp_path: Path) -> N
         ],
     )
     assert result.exit_code == 1
-    assert "unknown runner" in result.stdout
+    assert "unknown engine" in result.stdout
 
 
 def test_cli_run_with_critic_human_prints_pending_message_not_schema_failure(

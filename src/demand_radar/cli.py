@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -14,7 +15,12 @@ import typer
 from langchain_core.runnables import RunnableConfig
 
 from demand_radar import _warnings  # noqa: F401
-from demand_radar.agents.base import AgentRunner, NeverCalledRunner, sha256_file
+from demand_radar.agents.base import (
+    READ_ONLY_DATA_PROFILE,
+    AgentRunner,
+    NeverCalledRunner,
+    sha256_file,
+)
 from demand_radar.agents.fake import FakeRunner
 from demand_radar.config import ProductConfig, load_product_config_by_name
 from demand_radar.graph.build import build_graph, open_checkpointer, run_or_resume
@@ -71,15 +77,85 @@ def _load_product_or_exit(product: str) -> ProductConfig:
         raise typer.Exit(code=1) from exc
 
 
-def get_runner(name: str) -> AgentRunner:
-    if name == "fake":
-        return FakeRunner(provider_name="fake")
-    if name in ("claude", "codex"):
-        from demand_radar.agents.o7_invoke import O7InvokeRunner
+def _make_o7_runner(engine: str) -> AgentRunner:
+    # Lazy import kept inside this small named function (rather than at
+    # module scope, and rather than inline in a lambda in RUNNER_FACTORIES)
+    # specifically so offline paths that never touch a real runner --
+    # `init`, `ingest`, `report`, `verify`, `--analyst fake --critic fake`
+    # runs -- never import o7_invoke.py (and its subprocess-adjacent
+    # module-level constants) at all.
+    from demand_radar.agents.o7_invoke import O7InvokeRunner
 
-        return O7InvokeRunner(engine=name)
-    typer.echo(f"error: unknown runner {name!r}; expected fake, claude, or codex", err=True)
+    return O7InvokeRunner(engine=engine)
+
+
+# One entry per known agent *transport* (how a runner actually reaches
+# claude/codex), keyed by the --runner CLI value -- currently just "o7"
+# (O7InvokeRunner, shelling out to `o7 invoke`). Kept as a registry rather
+# than an if/elif chain so a second transport can be added by adding one
+# entry here, not by editing get_runner's control flow.
+RUNNER_FACTORIES: dict[str, Callable[[str], AgentRunner]] = {"o7": _make_o7_runner}
+
+
+def get_runner(engine: str, runner: str) -> AgentRunner:
+    """`engine` (fake | claude | codex) selects which model backend to use;
+    `runner` (currently only "o7") selects the transport that reaches it --
+    two independent axes, spec section 13's runner/engine split."""
+    if engine == "fake":
+        # FakeRunner is itself the transport -- an in-process stand-in that
+        # never shells out to anything -- so which --runner was requested is
+        # moot for it; "fake" always ignores the runner axis rather than
+        # erroring on an unrecognized one, since the whole point of --analyst
+        # fake/--critic fake is to work identically regardless of what
+        # transport a real run would have used.
+        return FakeRunner(provider_name="fake")
+    if engine in ("claude", "codex"):
+        factory = RUNNER_FACTORIES.get(runner)
+        if factory is None:
+            typer.echo(
+                f"error: unknown runner {runner!r}; expected one of: "
+                f"{', '.join(sorted(RUNNER_FACTORIES))}",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        return factory(engine)
+    typer.echo(
+        f"error: unknown engine {engine!r}; expected fake, claude, or codex "
+        f"(runner transport was {runner!r})",
+        err=True,
+    )
     raise typer.Exit(code=1)
+
+
+def _refuse_unverified_profiles(
+    checks: Sequence[tuple[str, str, AgentRunner]], *, runner: str
+) -> None:
+    """spec section 17/Zone 2: refuse to route untrusted evidence text
+    through any constructed runner whose verified_profiles() doesn't
+    provably cover read-only-data -- see
+    agents/base.py::AgentRunner.verified_profiles and
+    docs/trust-boundaries.md. Replaces the old codex-specific hardcoded
+    `if "codex" in (analyst, critic)` check: the refusal now falls out of
+    what the constructed runner can actually prove rather than a hardcoded
+    engine-name comparison, so a future verified runner (or a newly
+    unverified one) doesn't need a code change here, only an honest
+    verified_profiles() implementation.
+
+    `checks` is (role, engine_name, runner) triples -- role is "analyst" or
+    "critic", purely for the error message.
+    """
+    for role, engine_name, r in checks:
+        if READ_ONLY_DATA_PROFILE not in r.verified_profiles():
+            typer.echo(
+                f"error: unverified_capability_profile -- {role} engine {engine_name!r} "
+                f"via runner {runner!r} cannot provably enforce the 'read-only-data' "
+                "profile required for untrusted evidence text; see "
+                "docs/trust-boundaries.md and docs/runner-contract.md. "
+                "`demand-radar smoke-agents` may still probe codex reachability -- it "
+                "sends no evidence content.",
+                err=True,
+            )
+            raise typer.Exit(code=2)
 
 
 @app.command()
@@ -152,8 +228,18 @@ _VERDICT_EXIT_CODE = {"PASS": 0, "FAIL": 1, "BLOCKED": 2}
 def run(
     product: str = typer.Option(..., "--product"),
     since: str = typer.Option(None, "--since", help="e.g. 30d, 12h, 2w. Omit for all time."),
-    analyst: str = typer.Option("fake", "--analyst", help="fake | claude | codex"),
-    critic: str = typer.Option("fake", "--critic", help="fake | claude | codex | human"),
+    analyst: str = typer.Option(
+        "fake", "--analyst", help="agent engine (not transport): fake | claude | codex"
+    ),
+    critic: str = typer.Option(
+        "fake", "--critic", help="agent engine (not transport): fake | claude | codex | human"
+    ),
+    runner: str = typer.Option(
+        "o7",
+        "--runner",
+        help="agent transport reaching --analyst/--critic's engine (irrelevant when the "
+        "engine is 'fake', which is its own transport): " + ", ".join(sorted(RUNNER_FACTORIES)),
+    ),
     db: Path = DB_OPTION,
     runs_dir: Path = RUNS_DIR_OPTION,
     run_id: str = RUN_ID_OPTION,
@@ -175,29 +261,31 @@ def run(
         )
         raise typer.Exit(code=2)
 
-    if "codex" in (analyst, critic):
-        # Zone 2 (classify/generate_opportunities/critic_review) feeds
-        # untrusted evidence text to whichever engine is selected. Claude's
-        # closed-world guarantee is structural (`--tools ""` removes the
-        # tool surface entirely) and live-verified in this environment.
-        # Codex's is not: `o7 invoke`'s codex path relies on `--sandbox
-        # read-only` (denies writes, not network) plus an *unverified*
-        # `-c features.shell_tool=false` -- neither has ever been observed
-        # against a real codex install (see docs/trust-boundaries.md,
-        # 007/docs/o7-invoke.md). Refusing rather than silently accepting
-        # untrusted content into an engine whose tool-removal isn't proven
-        # -- lift this once a live install + adversarial smoke test confirms
-        # the flag actually does what it claims.
-        typer.echo(
-            "error: codex_unverified_for_untrusted_content -- Codex's closed-world "
-            "guarantee (no shell tool) is not verified against a live install and "
-            "must not be used for --analyst/--critic, which process untrusted "
-            "evidence text. Use --analyst claude --critic fake (or vice versa) "
-            "until this is lifted. `demand-radar smoke-agents` may still probe "
-            "codex reachability -- it sends no evidence content.",
-            err=True,
-        )
-        raise typer.Exit(code=2)
+    # Runner construction happens here, before product/store setup below --
+    # it has no store dependency, and doing it first means a refusal (unknown
+    # engine/runner, or the unverified-capability-profile check right after)
+    # never has to open and then close a store it never used. "human" is
+    # deliberately not a get_runner() branch: it is only ever legal for
+    # --critic (an --analyst human falls through to get_runner's "unknown
+    # engine" refusal, which is correct -- the analyst role always needs a
+    # real generation call). critic_review's own human-mode skip
+    # (graph/nodes/agents.py) never calls this runner; NeverCalledRunner
+    # exists so a future bug that broke that skip would crash loudly instead
+    # of silently faking a verdict -- and, per its verified_profiles(),
+    # trivially clears the capability-profile check below too, since it can
+    # never route anything anywhere.
+    analyst_runner = get_runner(analyst, runner)
+    critic_runner = NeverCalledRunner() if critic == "human" else get_runner(critic, runner)
+
+    # Replaces the old hardcoded `if "codex" in (analyst, critic)` check:
+    # the refusal is now keyed off what each constructed runner can actually
+    # prove about itself (see agents/base.py::AgentRunner.verified_profiles),
+    # not a hardcoded engine name. Zone 2 (classify/generate_opportunities/
+    # critic_review) feeds untrusted evidence text to whichever engine is
+    # selected, so both roles must clear this before anything else runs.
+    _refuse_unverified_profiles(
+        [("analyst", analyst, analyst_runner), ("critic", critic, critic_runner)], runner=runner
+    )
 
     product_config = _load_product_or_exit(product)
     store = _open_store_or_exit(db)
@@ -207,22 +295,8 @@ def run(
         store.create_run(resolved_run_id, product, since, analyst, critic)
     run_dir = runs_dir / product / resolved_run_id
 
-    try:
-        analyst_runner = get_runner(analyst)
-        # "human" is deliberately not a get_runner() branch: it is only ever
-        # legal for --critic (an --analyst human would fall through to
-        # get_runner's existing "unknown runner" refusal, which is correct
-        # -- the analyst role always needs a real generation call). critic_
-        # review's own human-mode skip (graph/nodes/agents.py) never calls
-        # this runner; NeverCalledRunner exists so a future bug that broke
-        # that skip would crash loudly instead of silently faking a verdict.
-        critic_runner = NeverCalledRunner() if critic == "human" else get_runner(critic)
-    except typer.Exit:
-        store.close()
-        raise
-
     now = datetime.now(UTC)
-    _write_task_yaml(run_dir, resolved_run_id, product, since, analyst, critic, now)
+    _write_task_yaml(run_dir, resolved_run_id, product, since, analyst, critic, now, runner=runner)
 
     ctx = RunContext(
         store=store,
@@ -272,6 +346,8 @@ def _write_task_yaml(
     analyst: str,
     critic: str,
     now: datetime,
+    *,
+    runner: str = "o7",
 ) -> None:
     import yaml
 
@@ -282,6 +358,14 @@ def _write_task_yaml(
         "since": since,
         "analyst": analyst,
         "critic": critic,
+        # Recorded alongside analyst/critic (which engine) for the same
+        # provenance reasons -- which *transport* reached that engine on
+        # this run. Defaulted rather than required so existing callers that
+        # write task.yaml directly (test fixtures predating --runner) don't
+        # need updating; task.yaml has no schema/additionalProperties gate,
+        # so this key is purely additive -- see review.py's task.yaml
+        # readers, all of which use dict.get()/generic key access.
+        "runner": runner,
         "started_at": now.isoformat(),
     }
     (run_dir / "task.yaml").write_text(yaml.safe_dump(task, sort_keys=False), encoding="utf-8")

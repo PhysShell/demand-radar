@@ -14,7 +14,7 @@ from typing import Literal
 
 import jsonschema
 
-from demand_radar.agents.base import hash_input_paths, sha256_text
+from demand_radar.agents.base import READ_ONLY_DATA_PROFILE, hash_input_paths, sha256_text
 from demand_radar.models import AgentResult
 
 ScenarioKind = Literal[
@@ -46,6 +46,14 @@ class FakeRunner:
         self.provider_name = provider_name
         self.scenarios = scenarios or {}
         self.default = default if default is not None else FakeScenario(kind="success", output={})
+
+    def verified_profiles(self) -> frozenset[str]:
+        # Never spawns a subprocess and never reads outside run_dir -- every
+        # scenario below only writes fixed/scripted bytes into run_dir and
+        # returns a canned AgentResult, so the read-only-data guarantee is
+        # true of this class by construction, not by verification against a
+        # real backend (there is no real backend here to verify against).
+        return frozenset({READ_ONLY_DATA_PROFILE})
 
     def run(
         self,
